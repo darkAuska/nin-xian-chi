@@ -573,6 +573,7 @@ export class BanquetScene extends Phaser.Scene {
         const sameActorContinues = !food.spicy && actor === target;
         if (actor === "player" && sameActorContinues) {
           this.phase = "player-pick";
+          this.renderFoods();
           this.turnText.setText("你可以继续夹菜");
           this.setMessage("安全。按照桌上的规矩，你可以继续。 ");
         } else if (actor === "dealer" && sameActorContinues) {
@@ -581,6 +582,7 @@ export class BanquetScene extends Phaser.Scene {
           this.beginAiTurn(false);
         } else {
           this.phase = "player-pick";
+          this.renderFoods();
           this.turnText.setText("轮到你夹菜");
           this.setMessage("领导把公筷递给了你。 ");
         }
