@@ -19,4 +19,4 @@ npm run dev
 4. 自己吃到普通甜椒可继续行动。
 5. 吃到超级无敌辣椒失去一杯牛奶，三杯耗尽即失败。
 
-完整设计见 [GAME_DESIGN.md](./GAME_DESIGN.md)。
+完整设计见 [GAME_DESIGN.md](./GAME_DESIGN.md)，分阶段开发路线见 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)。

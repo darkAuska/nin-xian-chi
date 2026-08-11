@@ -1,4 +1,12 @@
 import * as Phaser from "phaser";
+import {
+  createRoundFoodFlags,
+  MAX_HEALTH,
+  resolveTurn,
+  spicyCountForRound,
+  type Actor,
+  type Target,
+} from "./gameRules";
 
 type Phase =
   | "intro"
@@ -10,9 +18,6 @@ type Phase =
   | "won"
   | "lost";
 
-type Actor = "player" | "dealer";
-type Target = "player" | "dealer";
-
 type Food = {
   id: number;
   spicy: boolean;
@@ -22,7 +27,6 @@ type Food = {
 
 const WIDTH = 1280;
 const HEIGHT = 720;
-const MAX_HEALTH = 3;
 const DISH_POSITIONS = [
   { x: 325, y: 438, scale: 0.86 },
   { x: 485, y: 398, scale: 0.93 },
@@ -371,7 +375,7 @@ export class BanquetScene extends Phaser.Scene {
     this.selectedFoodId = null;
     this.targetPanel.setVisible(false);
 
-    const spicyCount = Math.min(4, this.round + 1);
+    const spicyCount = spicyCountForRound(this.round);
     const safeCount = 6 - spicyCount;
     const preview = [
       ...Array.from({ length: spicyCount }, () => true),
@@ -387,12 +391,9 @@ export class BanquetScene extends Phaser.Scene {
     this.tone(240, 0.08, "triangle");
 
     this.time.delayedCall(1900, () => {
-      const shuffled = Phaser.Utils.Array.Shuffle([...preview]);
+      const shuffled = createRoundFoodFlags(this.round);
       this.foods = shuffled.map((spicy, id) => ({ id, spicy, revealed: false, consumed: false }));
-      this.phase = "player-pick";
-      this.renderFoods();
-      this.turnText.setText("轮到你夹菜");
-      this.setMessage("餐盖已经打乱。选一份吧。");
+      this.beginPlayerTurn(false, "餐盖已经打乱。选一份吧。");
       this.tone(90, 0.18, "square");
     });
   }
@@ -516,6 +517,7 @@ export class BanquetScene extends Phaser.Scene {
   private resolveChoice(actor: Actor, target: Target, foodId: number) {
     const food = this.foods.find((candidate) => candidate.id === foodId);
     if (!food || food.consumed || this.phase === "resolving") return;
+    const resolution = resolveTurn(actor, target, food.spicy);
 
     this.phase = "resolving";
     this.targetPanel.setVisible(false);
@@ -529,10 +531,10 @@ export class BanquetScene extends Phaser.Scene {
     this.tone(155, 0.11, "sawtooth");
 
     this.time.delayedCall(650, () => {
-      if (food.spicy) {
-        if (target === "player") this.playerHealth = Math.max(0, this.playerHealth - 1);
+      if (resolution.damageTo) {
+        if (resolution.damageTo === "player") this.playerHealth = Math.max(0, this.playerHealth - 1);
         else this.dealerHealth = Math.max(0, this.dealerHealth - 1);
-        this.playSpicyReaction(target);
+        this.playSpicyReaction(resolution.damageTo);
         this.setMessage(
           target === "player"
             ? "超级无敌辣椒。你的表情管理出现严重漏洞。"
@@ -570,28 +572,29 @@ export class BanquetScene extends Phaser.Scene {
           return;
         }
 
-        const sameActorContinues = !food.spicy && actor === target;
-        if (actor === "player" && sameActorContinues) {
-          this.phase = "player-pick";
-          this.renderFoods();
-          this.turnText.setText("你可以继续夹菜");
-          this.setMessage("安全。按照桌上的规矩，你可以继续。 ");
-        } else if (actor === "dealer" && sameActorContinues) {
-          this.beginAiTurn(true);
-        } else if (actor === "player") {
-          this.beginAiTurn(false);
+        if (resolution.nextActor === "player") {
+          this.beginPlayerTurn(resolution.extraTurn);
         } else {
-          this.phase = "player-pick";
-          this.renderFoods();
-          this.turnText.setText("轮到你夹菜");
-          this.setMessage("领导把公筷递给了你。 ");
+          this.beginAiTurn(resolution.extraTurn);
         }
       });
     });
   }
 
+  private beginPlayerTurn(continuing: boolean, message?: string) {
+    this.phase = "player-pick";
+    this.selectedFoodId = null;
+    this.targetPanel.setVisible(false);
+    this.renderFoods();
+    this.turnText.setText(continuing ? "你可以继续夹菜" : "轮到你夹菜");
+    this.setMessage(message ?? (continuing ? "安全。按照桌上的规矩，你可以继续。" : "领导把公筷递给了你。"));
+  }
+
   private beginAiTurn(continuing: boolean) {
     this.phase = "ai-turn";
+    this.selectedFoodId = null;
+    this.targetPanel.setVisible(false);
+    this.renderFoods();
     this.turnText.setText(continuing ? "领导继续夹菜" : "轮到领导夹菜");
     this.setMessage(continuing ? "领导的运气不错。他决定再试一次。" : "领导正在进行风险评估……");
 
