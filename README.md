@@ -22,4 +22,4 @@ npm run dev
 
 领导会按公开概率和自己用牙签获得的私有信息使用道具，不会读取未知食物的真实身份。
 
-完整设计见 [GAME_DESIGN.md](./GAME_DESIGN.md)，分阶段开发路线见 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)，新增道具的方法见 [ITEM_SYSTEM.md](./ITEM_SYSTEM.md)，AI 公平决策约定见 [AI_STRATEGY.md](./AI_STRATEGY.md)。
+完整设计见 [GAME_DESIGN.md](./GAME_DESIGN.md)，分阶段开发路线见 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)，美术方向与资产清单见 [ART_DIRECTION.md](./ART_DIRECTION.md)，新增道具的方法见 [ITEM_SYSTEM.md](./ITEM_SYSTEM.md)，AI 公平决策约定见 [AI_STRATEGY.md](./AI_STRATEGY.md)。

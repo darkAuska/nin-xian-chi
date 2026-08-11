@@ -95,6 +95,11 @@ export class BanquetScene extends Phaser.Scene {
     super("BanquetScene");
   }
 
+  preload() {
+    this.load.image("banquet-hall", "/assets/banquet-hall-v1.png");
+    this.load.image("leader-silhouette", "/assets/leader-v1.png");
+  }
+
   create() {
     this.cameras.main.setBackgroundColor("#160907");
     this.registerItemEffects();
@@ -105,42 +110,30 @@ export class BanquetScene extends Phaser.Scene {
   }
 
   private drawRoom() {
-    this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, 0x160907);
-    this.add.rectangle(WIDTH / 2, 170, WIDTH, 340, 0x210d0a);
-
-    const wall = this.add.graphics();
-    wall.fillStyle(0x3a1710, 0.55);
-    wall.fillTriangle(450, 0, 830, 0, 710, 340);
-    wall.fillTriangle(0, 0, 225, 0, 330, 370);
-    wall.fillTriangle(WIDTH, 0, WIDTH - 225, 0, 950, 370);
-    wall.lineStyle(2, 0x7f3622, 0.28);
-    for (let x = 70; x < WIDTH; x += 110) wall.lineBetween(x, 0, x - 18, 350);
-
     this.add
-      .text(WIDTH / 2, 54, "年度新品试吃交流会", {
-        fontFamily: "serif",
-        fontSize: "34px",
-        color: "#7c3024",
-        letterSpacing: 10,
-      })
-      .setOrigin(0.5)
-      .setAlpha(0.48);
-
-    this.add
-      .text(WIDTH / 2, 92, "请保持微笑 · 请服从夹菜 · 请不要浪费牛奶", {
-        fontFamily: "monospace",
-        fontSize: "11px",
-        color: "#6f3329",
-        letterSpacing: 3,
-      })
-      .setOrigin(0.5);
+      .image(WIDTH / 2, HEIGHT / 2, "banquet-hall")
+      .setDisplaySize(WIDTH, HEIGHT)
+      .setDepth(0);
+    this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, 0x120403, 0.2).setDepth(1);
 
     this.dealerSilhouette = this.createDealer();
 
-    this.add.ellipse(WIDTH / 2, 598, 1390, 505, 0x1c0705).setStrokeStyle(16, 0x090202, 0.9);
-    this.add.ellipse(WIDTH / 2, 552, 1300, 370, 0x4b170f).setStrokeStyle(8, 0x7a2a19, 0.65);
-    this.add.ellipse(WIDTH / 2, 545, 750, 245, 0x2b0c08).setStrokeStyle(4, 0x8b351e, 0.55);
-    this.add.ellipse(WIDTH / 2, 535, 700, 210, 0x35110b).setStrokeStyle(2, 0xd06a38, 0.25);
+    this.add
+      .ellipse(WIDTH / 2, 598, 1390, 505, 0x1c0705)
+      .setStrokeStyle(16, 0x090202, 0.9)
+      .setDepth(5);
+    this.add
+      .ellipse(WIDTH / 2, 552, 1300, 370, 0x4b170f)
+      .setStrokeStyle(8, 0x7a2a19, 0.65)
+      .setDepth(5);
+    this.add
+      .ellipse(WIDTH / 2, 545, 750, 245, 0x2b0c08)
+      .setStrokeStyle(4, 0x8b351e, 0.55)
+      .setDepth(5);
+    this.add
+      .ellipse(WIDTH / 2, 535, 700, 210, 0x35110b)
+      .setStrokeStyle(2, 0xd06a38, 0.25)
+      .setDepth(5);
 
     this.createPlayerHands();
 
@@ -156,29 +149,16 @@ export class BanquetScene extends Phaser.Scene {
   }
 
   private createDealer() {
-    const container = this.add.container(WIDTH / 2, 235).setDepth(2);
-    const body = this.add.graphics();
-    body.fillStyle(0x030202, 1);
-    body.fillEllipse(0, 115, 330, 230);
-    body.fillCircle(0, -18, 86);
-    body.fillTriangle(-34, 40, 0, 132, 34, 40);
-    body.fillStyle(0x6f0f0c, 1);
-    body.fillTriangle(0, 58, -19, 91, 0, 132);
-    body.fillTriangle(0, 58, 19, 91, 0, 132);
+    const container = this.add.container(WIDTH / 2, 258).setDepth(2);
+    const dimHalo = this.add.ellipse(0, 26, 470, 350, 0x7e1d13, 0.13);
+    const portrait = this.add
+      .image(0, 25, "leader-silhouette")
+      .setDisplaySize(465, 465);
 
-    const face = this.add.graphics();
-    face.fillStyle(0xf5e7ce, 0.96);
-    face.fillRoundedRect(-35, 2, 70, 20, 8);
-    face.fillStyle(0x170403, 1);
-    for (let x = -25; x <= 25; x += 12) face.fillRect(x, 3, 3, 18);
-    face.fillStyle(0xe7c9a0, 0.8);
-    face.fillCircle(-31, -29, 5);
-    face.fillCircle(31, -29, 5);
-
-    container.add([body, face]);
+    container.add([dimHalo, portrait]);
     this.tweens.add({
       targets: container,
-      y: 239,
+      y: 264,
       duration: 2300,
       yoyo: true,
       repeat: -1,
@@ -199,6 +179,11 @@ export class BanquetScene extends Phaser.Scene {
   }
 
   private createHud() {
+    this.add
+      .rectangle(WIDTH / 2, 70, 790, 100, 0x090202, 0.68)
+      .setStrokeStyle(1, 0x7a2a19, 0.45)
+      .setDepth(29);
+
     this.roundText = this.add
       .text(34, 26, "尚未入席", {
         fontFamily: "monospace",
@@ -217,9 +202,9 @@ export class BanquetScene extends Phaser.Scene {
       .setDepth(30);
 
     this.statusText = this.add
-      .text(WIDTH / 2, 125, "请坐。", {
+      .text(WIDTH / 2, 52, "请坐。", {
         fontFamily: "serif",
-        fontSize: "24px",
+        fontSize: "21px",
         color: "#ffe6b7",
         align: "center",
         wordWrap: { width: 760 },
@@ -228,7 +213,7 @@ export class BanquetScene extends Phaser.Scene {
       .setDepth(30);
 
     this.remainingText = this.add
-      .text(WIDTH / 2, 160, "", {
+      .text(WIDTH / 2, 88, "", {
         fontFamily: "monospace",
         fontSize: "13px",
         color: "#b86b4b",
@@ -238,7 +223,7 @@ export class BanquetScene extends Phaser.Scene {
       .setDepth(30);
 
     this.spicyOilText = this.add
-      .text(WIDTH / 2, 187, "魔鬼辣椒油待触发 · 下一颗超级辣椒造成 2 点伤害", {
+      .text(WIDTH / 2, 119, "魔鬼辣椒油待触发 · 下一颗超级辣椒造成 2 点伤害", {
         fontFamily: "monospace",
         fontSize: "12px",
         color: "#ff7045",
