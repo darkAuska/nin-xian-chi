@@ -53,6 +53,12 @@ const DISH_POSITIONS = [
   { x: 645, y: 510, scale: 1.08 },
 ];
 const SERVING_POSITION = { x: WIDTH / 2, y: 478, scale: 1.24 };
+const ITEM_TEXTURES: Record<string, string> = {
+  toothpick: "item-toothpick",
+  "serving-chopsticks": "item-chopsticks",
+  "takeout-box": "item-takeout",
+  "devil-chili-oil": "item-chili-oil",
+};
 
 export class BanquetScene extends Phaser.Scene {
   private phase: Phase = "intro";
@@ -98,6 +104,13 @@ export class BanquetScene extends Phaser.Scene {
   preload() {
     this.load.image("banquet-hall", "/assets/banquet-hall-v1.png");
     this.load.image("leader-silhouette", "/assets/leader-v1.png");
+    this.load.image("cloche", "/assets/cloche-v1.png");
+    this.load.image("sweet-pepper", "/assets/sweet-pepper-v1.png");
+    this.load.image("super-chili", "/assets/super-chili-v1.png");
+    this.load.image("item-toothpick", "/assets/item-toothpick-v1.png");
+    this.load.image("item-chopsticks", "/assets/item-chopsticks-v1.png");
+    this.load.image("item-takeout", "/assets/item-takeout-v1.png");
+    this.load.image("item-chili-oil", "/assets/item-chili-oil-v1.png");
   }
 
   create() {
@@ -330,13 +343,19 @@ export class BanquetScene extends Phaser.Scene {
 
       if (item) {
         const definition = getItemDefinition(item.definitionId);
-        const icon = this.add
-          .text(player ? -29 : -26, 0, definition.shortLabel, {
-            fontFamily: "serif",
-            fontSize: "21px",
-            color: `#${definition.tint.toString(16).padStart(6, "0")}`,
-          })
-          .setOrigin(0.5);
+        const iconTexture = ITEM_TEXTURES[definition.id];
+        const icon = iconTexture
+          ? this.add
+              .image(player ? -29 : -27, 0, iconTexture)
+              .setDisplaySize(34, 34)
+              .setAlpha(player && !canInteract ? 0.58 : 0.92)
+          : this.add
+              .text(player ? -29 : -26, 0, definition.shortLabel, {
+                fontFamily: "serif",
+                fontSize: "21px",
+                color: `#${definition.tint.toString(16).padStart(6, "0")}`,
+              })
+              .setOrigin(0.5);
         const name = this.add
           .text(player ? 12 : 10, 0, definition.name, {
             fontFamily: "monospace",
@@ -568,7 +587,9 @@ export class BanquetScene extends Phaser.Scene {
           .setOrigin(0.5);
         container.add([graphics, empty]);
       } else if (food.revealed) {
-        const pepper = this.drawPepper(food.spicy);
+        const pepper = this.add
+          .image(0, food.spicy ? -7 : -4, food.spicy ? "super-chili" : "sweet-pepper")
+          .setDisplaySize(food.spicy ? 102 : 88, food.spicy ? 66 : 58);
         const label = this.add
           .text(0, 53, food.spicy ? "超级无敌辣椒" : "普通甜椒", {
             fontFamily: "monospace",
@@ -578,17 +599,8 @@ export class BanquetScene extends Phaser.Scene {
           .setOrigin(0.5);
         container.add([graphics, pepper, label]);
       } else {
-        graphics.fillStyle(0x9d8b7d, 1);
-        graphics.fillEllipse(0, -3, 112, 52);
-        graphics.fillStyle(0xb7a79a, 1);
-        graphics.fillRect(-49, -5, 98, 19);
-        graphics.fillStyle(0xd6c7b8, 1);
-        graphics.fillEllipse(0, -16, 96, 32);
-        graphics.fillStyle(0x5a4d45, 1);
-        graphics.fillRoundedRect(-12, -38, 24, 15, 7);
-        graphics.lineStyle(2, 0xf5e1ca, 0.45);
-        graphics.strokeEllipse(0, -16, 96, 32);
-        container.add(graphics);
+        const cloche = this.add.image(0, -7, "cloche").setDisplaySize(124, 82);
+        container.add([graphics, cloche]);
       }
 
       if ((this.selectedFoodId === food.id || this.itemTargetIds.includes(food.id)) && !food.consumed) {
@@ -612,29 +624,6 @@ export class BanquetScene extends Phaser.Scene {
 
       this.foodObjects.set(food.id, container);
     });
-  }
-
-  private drawPepper(spicy: boolean) {
-    const root = this.add.container(0, -5);
-    const pepper = this.add.graphics();
-    const color = spicy ? 0xd91f13 : 0x65a844;
-    pepper.fillStyle(color, 1);
-    pepper.fillEllipse(-6, 0, 70, 25);
-    pepper.fillTriangle(18, -11, 52, 2, 19, 10);
-    pepper.fillStyle(spicy ? 0xff5a24 : 0x8dcf58, 0.65);
-    pepper.fillEllipse(-21, -4, 25, 8);
-    pepper.lineStyle(6, 0x39733a, 1);
-    pepper.lineBetween(-40, -4, -53, -15);
-    root.add(pepper);
-
-    if (spicy) {
-      const flame = this.add.graphics();
-      flame.fillStyle(0xffb000, 0.88);
-      flame.fillTriangle(-16, -17, -5, -42, 2, -16);
-      flame.fillTriangle(3, -16, 14, -35, 21, -13);
-      root.add(flame);
-    }
-    return root;
   }
 
   private clearFoods() {
