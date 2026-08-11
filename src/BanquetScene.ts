@@ -94,6 +94,8 @@ export class BanquetScene extends Phaser.Scene {
   private introOverlay?: Phaser.GameObjects.Container;
   private resultOverlay?: Phaser.GameObjects.Container;
   private dealerSilhouette!: Phaser.GameObjects.Container;
+  private playerHands!: Phaser.GameObjects.Container;
+  private restartButton!: Phaser.GameObjects.Container;
   private flash!: Phaser.GameObjects.Rectangle;
   private audioContext?: AudioContext;
 
@@ -111,6 +113,7 @@ export class BanquetScene extends Phaser.Scene {
     this.load.image("item-chopsticks", "/assets/item-chopsticks-v1.png");
     this.load.image("item-takeout", "/assets/item-takeout-v1.png");
     this.load.image("item-chili-oil", "/assets/item-chili-oil-v1.png");
+    this.load.image("player-hand", "/assets/player-hand-v1.png");
   }
 
   create() {
@@ -148,7 +151,7 @@ export class BanquetScene extends Phaser.Scene {
       .setStrokeStyle(2, 0xd06a38, 0.25)
       .setDepth(5);
 
-    this.createPlayerHands();
+    this.playerHands = this.createPlayerHands();
 
     const noise = this.add.graphics().setDepth(90).setAlpha(0.13);
     noise.lineStyle(1, 0xf4d19a, 0.16);
@@ -181,14 +184,18 @@ export class BanquetScene extends Phaser.Scene {
   }
 
   private createPlayerHands() {
-    const left = this.add.graphics().setDepth(22);
-    left.fillStyle(0x070202, 1);
-    left.fillRoundedRect(-135, -48, 270, 95, 46);
-    left.setPosition(190, 696).setAngle(-6);
-    const right = this.add.graphics().setDepth(22);
-    right.fillStyle(0x070202, 1);
-    right.fillRoundedRect(-135, -48, 270, 95, 46);
-    right.setPosition(1090, 696).setAngle(6);
+    const root = this.add.container(0, 0).setDepth(22);
+    const left = this.add
+      .image(150, 694, "player-hand")
+      .setDisplaySize(310, 310)
+      .setAngle(-7);
+    const right = this.add
+      .image(WIDTH - 150, 694, "player-hand")
+      .setDisplaySize(310, 310)
+      .setFlipX(true)
+      .setAngle(7);
+    root.add([left, right]);
+    return root;
   }
 
   private createHud() {
@@ -261,6 +268,9 @@ export class BanquetScene extends Phaser.Scene {
     this.playerMilk = this.add.container(190, 625).setDepth(31);
     this.dealerItemRoot = this.add.container(1150, 230).setDepth(52);
     this.playerItemRoot = this.add.container(WIDTH / 2, 695).setDepth(70);
+    this.restartButton = this.makeCompactButton(1191, 91, 142, 36, "立即重开", () => this.startGame())
+      .setDepth(61)
+      .setVisible(false);
     this.drawMilkRows();
     this.renderItemSlots();
   }
@@ -281,22 +291,27 @@ export class BanquetScene extends Phaser.Scene {
       .setOrigin(0.5);
     root.add(label);
 
+    const glasses: Phaser.GameObjects.Container[] = [];
     for (let index = 0; index < MAX_HEALTH; index += 1) {
+      const cup = this.add.container(index * 48, 0);
       const glass = this.add.graphics();
       const alive = index < health;
       glass.lineStyle(3, alive ? 0xe7e0cc : 0x5b4037, alive ? 0.9 : 0.35);
-      glass.strokeRoundedRect(index * 48, 0, 34, 42, 5);
+      glass.strokeRoundedRect(0, 0, 34, 42, 5);
       if (alive) {
         glass.fillStyle(0xd7edf0, 0.9);
-        glass.fillRoundedRect(index * 48 + 4, 13, 26, 25, 3);
+        glass.fillRoundedRect(4, 13, 26, 25, 3);
         glass.fillStyle(0xffffff, 0.5);
-        glass.fillRect(index * 48 + 8, 17, 4, 15);
+        glass.fillRect(8, 17, 4, 15);
       } else {
         glass.lineStyle(2, 0x8e251d, 0.55);
-        glass.lineBetween(index * 48 + 5, 5, index * 48 + 29, 36);
+        glass.lineBetween(5, 5, 29, 36);
       }
-      root.add(glass);
+      cup.add(glass);
+      root.add(cup);
+      glasses.push(cup);
     }
+    root.setData("milkGlasses", glasses);
   }
 
   private renderItemSlots() {
@@ -336,10 +351,11 @@ export class BanquetScene extends Phaser.Scene {
       const y = player ? 0 : index * 53;
       const slot = this.add.container(x, y);
       const active = item?.instanceId === this.activeItem?.instanceId;
+      const touchArea = this.add.rectangle(0, 0, player ? 100 : 92, player ? 78 : 51, 0xffffff, 0.001);
       const background = this.add
         .rectangle(0, 0, player ? 94 : 88, 43, item ? 0x2b130d : 0x120705, item ? 0.96 : 0.55)
         .setStrokeStyle(active ? 3 : 2, active ? 0xffd36f : 0x8d563d, item ? 0.8 : 0.25);
-      slot.add(background);
+      slot.add([touchArea, background]);
 
       if (item) {
         const definition = getItemDefinition(item.definitionId);
@@ -366,10 +382,14 @@ export class BanquetScene extends Phaser.Scene {
         slot.add([icon, name]);
 
         if (canInteract) {
-          background.setInteractive({ useHandCursor: true });
-          background.on("pointerover", () => slot.setScale(1.05));
-          background.on("pointerout", () => slot.setScale(1));
-          background.on("pointerdown", () => this.activatePlayerItem(item.instanceId));
+          touchArea.setInteractive({ useHandCursor: true });
+          touchArea.on("pointerover", () => slot.setScale(1.05));
+          touchArea.on("pointerout", () => slot.setScale(1));
+          touchArea.on("pointerdown", () => slot.setScale(0.96));
+          touchArea.on("pointerup", () => {
+            slot.setScale(1);
+            this.activatePlayerItem(item.instanceId);
+          });
         }
       } else {
         const empty = this.add
@@ -414,10 +434,10 @@ export class BanquetScene extends Phaser.Scene {
     onClick: () => void,
   ) {
     const root = this.add.container(x, y);
+    const touchArea = this.add.rectangle(0, 0, width + 18, Math.max(height, 84), 0xffffff, 0.001);
     const background = this.add
       .rectangle(0, 0, width, height, color, 0.95)
-      .setStrokeStyle(2, 0xffd29b, 0.55)
-      .setInteractive({ useHandCursor: true });
+      .setStrokeStyle(2, 0xffd29b, 0.55);
     const text = this.add
       .text(0, 0, label, {
         fontFamily: "serif",
@@ -425,10 +445,47 @@ export class BanquetScene extends Phaser.Scene {
         color: "#fff0d2",
       })
       .setOrigin(0.5);
-    background.on("pointerover", () => root.setScale(1.04));
-    background.on("pointerout", () => root.setScale(1));
-    background.on("pointerdown", onClick);
-    root.add([background, text]);
+    touchArea.setInteractive({ useHandCursor: true });
+    touchArea.on("pointerover", () => root.setScale(1.04));
+    touchArea.on("pointerout", () => root.setScale(1));
+    touchArea.on("pointerdown", () => root.setScale(0.96));
+    touchArea.on("pointerup", () => {
+      root.setScale(1);
+      onClick();
+    });
+    root.add([touchArea, background, text]);
+    return root;
+  }
+
+  private makeCompactButton(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    label: string,
+    onClick: () => void,
+  ) {
+    const root = this.add.container(x, y);
+    const touchArea = this.add.rectangle(0, 0, width + 12, Math.max(height, 60), 0xffffff, 0.001);
+    const background = this.add
+      .rectangle(0, 0, width, height, 0x240b08, 0.92)
+      .setStrokeStyle(1, 0xb05b38, 0.7);
+    const text = this.add
+      .text(0, 0, label, {
+        fontFamily: "monospace",
+        fontSize: "13px",
+        color: "#e8cda7",
+      })
+      .setOrigin(0.5);
+    touchArea.setInteractive({ useHandCursor: true });
+    touchArea.on("pointerover", () => root.setScale(1.04));
+    touchArea.on("pointerout", () => root.setScale(1));
+    touchArea.on("pointerdown", () => root.setScale(0.95));
+    touchArea.on("pointerup", () => {
+      root.setScale(1);
+      onClick();
+    });
+    root.add([touchArea, background, text]);
     return root;
   }
 
@@ -436,7 +493,7 @@ export class BanquetScene extends Phaser.Scene {
     const overlay = this.add.container(0, 0).setDepth(100);
     const shade = this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, 0x090202, 0.91);
     const panel = this.add
-      .rectangle(WIDTH / 2, HEIGHT / 2, 820, 530, 0x1c0907, 0.98)
+      .rectangle(WIDTH / 2, HEIGHT / 2, 860, 550, 0x1c0907, 0.98)
       .setStrokeStyle(3, 0x8f3422, 0.8);
     const eyebrow = this.add
       .text(WIDTH / 2, 150, "午夜公司年会 · 新品试吃环节", {
@@ -466,7 +523,7 @@ export class BanquetScene extends Phaser.Scene {
       .text(
         WIDTH / 2,
         365,
-        "① 记住本轮辣椒与甜椒的总数\n② 服务员每次只端上一盆\n③ 决定自己吃，还是请领导吃",
+        "① 记住本轮辣椒与甜椒的总数\n② 每次只看眼前一盆；道具可以先用，最多两件\n③ 最后点「我先吃」或「您先吃」——甜椒续手，辣椒换人",
         {
           fontFamily: "monospace",
           fontSize: "16px",
@@ -476,9 +533,9 @@ export class BanquetScene extends Phaser.Scene {
         },
       )
       .setOrigin(0.5);
-    const start = this.makeButton(WIDTH / 2, 515, 360, 74, "开始入席", 0x8f1e15, () => this.startGame());
+    const start = this.makeButton(WIDTH / 2, 525, 360, 74, "开始入席", 0x8f1e15, () => this.startGame());
     const warning = this.add
-      .text(WIDTH / 2, 580, "友情提示：领导坚持认为自己不怕辣", {
+      .text(WIDTH / 2, 590, "鼠标或触摸均可操作 · 领导坚持认为自己不怕辣", {
         fontFamily: "monospace",
         fontSize: "11px",
         color: "#75443a",
@@ -493,6 +550,7 @@ export class BanquetScene extends Phaser.Scene {
     this.tone(120, 0.16, "sawtooth");
     this.introOverlay?.destroy(true);
     this.resultOverlay?.destroy(true);
+    this.restartButton.setVisible(true);
     this.phase = "round-preview";
     this.round = 0;
     this.playerHealth = MAX_HEALTH;
@@ -506,6 +564,10 @@ export class BanquetScene extends Phaser.Scene {
     this.pendingSpicyDamage = BASE_SPICY_DAMAGE;
     this.activeItem = null;
     this.itemTargetIds = [];
+    this.dealerSilhouette.setX(WIDTH / 2).setAngle(0).setAlpha(1);
+    this.playerHands.setPosition(0, 0).setAngle(0).setAlpha(1);
+    this.dealerCaption.setText("笑容过于标准的领导");
+    this.flash.setAlpha(0);
     this.clearFoods();
     this.drawMilkRows();
     this.renderItemSlots();
@@ -598,9 +660,11 @@ export class BanquetScene extends Phaser.Scene {
           })
           .setOrigin(0.5);
         container.add([graphics, pepper, label]);
+        container.setData("foodVisuals", [pepper, label]);
       } else {
         const cloche = this.add.image(0, -7, "cloche").setDisplaySize(124, 82);
         container.add([graphics, cloche]);
+        container.setData("cloche", cloche);
       }
 
       if ((this.selectedFoodId === food.id || this.itemTargetIds.includes(food.id)) && !food.consumed) {
@@ -647,6 +711,7 @@ export class BanquetScene extends Phaser.Scene {
       }
 
       const wasRevealed = food.revealed;
+      this.playItemSound("peek-food");
       food.revealed = true;
       this.renderFoods();
       this.setMessage(
@@ -675,6 +740,7 @@ export class BanquetScene extends Phaser.Scene {
       }
 
       this.foods = swap.entries;
+      this.playItemSound("swap-next-food");
       this.servedFoodId = swap.servedId;
       this.selectedFoodId = this.servedFoodId;
       this.renderFoods();
@@ -700,6 +766,7 @@ export class BanquetScene extends Phaser.Scene {
         return;
       }
 
+      this.playItemSound("discard-current-food");
       food.revealed = true;
       this.renderFoods();
       this.setMessage(
@@ -747,6 +814,7 @@ export class BanquetScene extends Phaser.Scene {
       }
 
       this.pendingSpicyDamage = armed.pendingDamage;
+      this.playItemSound("boost-next-spicy");
       this.consumePlayerItem(item);
       this.updateSpicyOilHud();
       this.renderItemSlots();
@@ -886,18 +954,203 @@ export class BanquetScene extends Phaser.Scene {
     this.resolveChoice("player", target, this.servedFoodId);
   }
 
+  private liftCloche(foodId: number, onComplete: () => void) {
+    const holder = this.foodObjects.get(foodId);
+    const cloche = holder?.getData("cloche") as Phaser.GameObjects.Image | undefined;
+    if (!cloche) {
+      onComplete();
+      return;
+    }
+
+    this.playClocheSound();
+    this.tweens.add({
+      targets: cloche,
+      y: -112,
+      x: 20,
+      angle: 16,
+      alpha: 0,
+      scaleX: 1.12,
+      scaleY: 1.12,
+      duration: 420,
+      ease: "Back.In",
+      onComplete,
+    });
+  }
+
+  private playEatingMotion(foodId: number, target: Target, onComplete: () => void) {
+    const holder = this.foodObjects.get(foodId);
+    const visuals = holder?.getData("foodVisuals") as Phaser.GameObjects.GameObject[] | undefined;
+    if (!visuals?.length) {
+      onComplete();
+      return;
+    }
+
+    if (target === "player") {
+      this.tweens.add({
+        targets: this.playerHands,
+        y: -18,
+        duration: 150,
+        yoyo: true,
+        ease: "Quad.Out",
+      });
+    } else {
+      this.tweens.add({
+        targets: this.dealerSilhouette,
+        scaleX: 1.035,
+        scaleY: 1.035,
+        duration: 170,
+        yoyo: true,
+        ease: "Quad.Out",
+      });
+    }
+
+    this.playSwallowSound();
+    this.tweens.add({
+      targets: visuals,
+      y: target === "player" ? "+=105" : "-=125",
+      scaleX: 0.18,
+      scaleY: 0.18,
+      alpha: 0,
+      duration: 360,
+      ease: "Quad.In",
+      onComplete,
+    });
+  }
+
+  private playRevealEffect(foodId: number, spicy: boolean) {
+    const holder = this.foodObjects.get(foodId);
+    if (!holder) return;
+    const baseScale = holder.getData("baseScale") as number;
+    this.tweens.add({
+      targets: holder,
+      scaleX: baseScale * (spicy ? 1.08 : 1.035),
+      scaleY: baseScale * (spicy ? 1.08 : 1.035),
+      duration: spicy ? 95 : 150,
+      yoyo: true,
+      repeat: spicy ? 1 : 0,
+      ease: "Quad.Out",
+    });
+    if (!spicy) return;
+
+    const fire = this.add.container(0, -42).setDepth(8);
+    const colors = [0x74170f, 0xd33a19, 0xf48b2d, 0xffd06a, 0x1a0805];
+    for (let index = 0; index < 7; index += 1) {
+      const x = -42 + index * 14;
+      const height = 34 + (index % 3) * 9;
+      const flame = this.add
+        .triangle(x, 10, 0, height, 11, 0, 22, height, colors[index % colors.length], 0.96)
+        .setStrokeStyle(2, 0x250704, 0.75)
+        .setAngle(index % 2 === 0 ? -8 : 9)
+        .setScale(0.25)
+        .setAlpha(0);
+      fire.add(flame);
+      this.tweens.add({
+        targets: flame,
+        y: -12 - (index % 3) * 5,
+        scaleX: 1,
+        scaleY: 1,
+        alpha: 1,
+        angle: index % 2 === 0 ? 8 : -10,
+        duration: 170,
+        delay: index * 18,
+        yoyo: true,
+        repeat: 1,
+        ease: "Sine.InOut",
+      });
+    }
+    holder.add(fire);
+  }
+
+  private playPaperFireBurst(target: Target, boosted: boolean) {
+    const originX = target === "dealer" ? WIDTH / 2 + 8 : WIDTH / 2;
+    const originY = target === "dealer" ? 247 : 665;
+    const fire = this.add.container(originX, originY).setDepth(76);
+    const colors = [0x7b140d, 0xd62d16, 0xff7729, 0xffd477, 0x170302];
+    const pieceCount = boosted ? 13 : 9;
+
+    for (let index = 0; index < pieceCount; index += 1) {
+      const angle = target === "dealer" ? -42 + index * 8 : -142 + index * 9;
+      const distance = (boosted ? 150 : 110) + (index % 3) * 20;
+      const radians = Phaser.Math.DegToRad(angle);
+      const flame = this.add
+        .triangle(0, 0, 0, 27, 9, 0, 18, 27, colors[index % colors.length], 0.98)
+        .setStrokeStyle(2, 0x260402, 0.8)
+        .setAngle(angle + 90)
+        .setScale(0.3);
+      fire.add(flame);
+      this.tweens.add({
+        targets: flame,
+        x: Math.cos(radians) * distance,
+        y: Math.sin(radians) * distance,
+        scaleX: boosted ? 1.35 : 1,
+        scaleY: boosted ? 1.35 : 1,
+        alpha: 0,
+        angle: `+=${index % 2 === 0 ? 28 : -28}`,
+        duration: boosted ? 520 : 390,
+        delay: index * 18,
+        ease: "Quad.Out",
+      });
+    }
+
+    for (let index = 0; index < 4; index += 1) {
+      const smoke = this.add
+        .ellipse(0, 0, 28 + index * 7, 20 + index * 5, index % 2 ? 0x351a15 : 0x160b09, 0.78)
+        .setStrokeStyle(1, 0xb2603b, 0.22);
+      fire.add(smoke);
+      this.tweens.add({
+        targets: smoke,
+        x: target === "dealer" ? 65 + index * 25 : (index - 1.5) * 24,
+        y: target === "dealer" ? -28 - index * 18 : -58 - index * 24,
+        scaleX: 1.8,
+        scaleY: 1.8,
+        alpha: 0,
+        duration: 720,
+        delay: 140 + index * 60,
+        ease: "Sine.Out",
+      });
+    }
+    this.time.delayedCall(950, () => fire.destroy(true));
+  }
+
+  private animateMilkLoss(target: Target, oldHealth: number, newHealth: number) {
+    const root = target === "player" ? this.playerMilk : this.dealerMilk;
+    const glasses = root.getData("milkGlasses") as Phaser.GameObjects.Container[] | undefined;
+    const count = Math.max(0, oldHealth - newHealth);
+    if (!glasses?.length || count === 0) {
+      this.drawMilkRows();
+      return;
+    }
+
+    for (let offset = 0; offset < count; offset += 1) {
+      const cup = glasses[oldHealth - 1 - offset];
+      if (!cup) continue;
+      const delay = offset * 230;
+      this.time.delayedCall(delay, () => this.playMilkSound());
+      this.tweens.add({
+        targets: cup,
+        x: target === "player" ? 455 : -415,
+        y: target === "player" ? 102 : 112,
+        angle: target === "player" ? 38 : -62,
+        scaleX: 1.18,
+        scaleY: 1.18,
+        alpha: 0,
+        duration: 430,
+        delay,
+        ease: "Cubic.In",
+      });
+    }
+    this.time.delayedCall(520 + Math.max(0, count - 1) * 230, () => this.drawMilkRows());
+  }
+
   private resolveChoice(actor: Actor, target: Target, foodId: number) {
     const food = this.foods.find((candidate) => candidate.id === foodId);
     if (!food || food.consumed || this.phase === "resolving") return;
     const resolution = resolveTurn(actor, target, food.spicy);
     const spicyDamage = resolveSpicyDamage(food.spicy, this.pendingSpicyDamage);
-    this.pendingSpicyDamage = spicyDamage.nextPendingDamage;
-    this.updateSpicyOilHud();
 
     this.phase = "resolving";
     this.targetPanel.setVisible(false);
     this.selectedFoodId = foodId;
-    food.revealed = true;
     this.renderFoods();
     this.renderItemSlots();
 
@@ -906,64 +1159,96 @@ export class BanquetScene extends Phaser.Scene {
     this.setMessage(`${actorName}把餐盖推向${targetName}……`);
     this.tone(155, 0.11, "sawtooth");
 
-    this.time.delayedCall(650, () => {
-      if (resolution.damageTo) {
-        if (resolution.damageTo === "player") {
-          this.playerHealth = Math.max(0, this.playerHealth - spicyDamage.damage);
-        } else {
-          this.dealerHealth = Math.max(0, this.dealerHealth - spicyDamage.damage);
-        }
-        this.playSpicyReaction(resolution.damageTo, spicyDamage.damage);
-        this.setMessage(
-          spicyDamage.boosted
-            ? target === "player"
-              ? "魔鬼辣椒油生效！你连续失去两杯牛奶。"
-              : "魔鬼辣椒油生效！领导连续失去两杯牛奶。"
-            : target === "player"
-              ? "超级无敌辣椒。你的表情管理出现严重漏洞。"
-              : "超级无敌辣椒。领导的标准笑容松动了。",
-        );
+    this.liftCloche(foodId, () => {
+      if (this.phase !== "resolving" || food.consumed) return;
+      food.revealed = true;
+      this.renderFoods();
+      this.playRevealEffect(foodId, food.spicy);
+      this.setMessage(
+        food.spicy
+          ? "餐盖一掀：火苗比辣椒先站了起来。"
+          : "餐盖一掀：只是一颗表情无辜的普通甜椒。",
+      );
+      this.tone(food.spicy ? 118 : 520, 0.11, food.spicy ? "sawtooth" : "sine");
+      this.time.delayedCall(280, () => {
+        this.playEatingMotion(foodId, target, () => {
+          this.completeFoodResolution(food, target, resolution, spicyDamage);
+        });
+      });
+    });
+  }
+
+  private completeFoodResolution(
+    food: Food,
+    target: Target,
+    resolution: ReturnType<typeof resolveTurn>,
+    spicyDamage: ReturnType<typeof resolveSpicyDamage>,
+  ) {
+    this.pendingSpicyDamage = spicyDamage.nextPendingDamage;
+    this.updateSpicyOilHud();
+
+    if (resolution.damageTo) {
+      const previousHealth =
+        resolution.damageTo === "player" ? this.playerHealth : this.dealerHealth;
+      if (resolution.damageTo === "player") {
+        this.playerHealth = Math.max(0, this.playerHealth - spicyDamage.damage);
       } else {
-        this.tone(430, 0.08, "sine");
-        this.setMessage(
-          target === "player"
-            ? "普通甜椒。你甚至尝到了少许清甜。"
-            : "普通甜椒。领导礼貌地咀嚼了七次。",
-        );
+        this.dealerHealth = Math.max(0, this.dealerHealth - spicyDamage.damage);
       }
-      this.drawMilkRows();
+      this.playSpicyReaction(resolution.damageTo, spicyDamage.damage);
+      this.animateMilkLoss(
+        resolution.damageTo,
+        previousHealth,
+        resolution.damageTo === "player" ? this.playerHealth : this.dealerHealth,
+      );
+      this.setMessage(
+        spicyDamage.boosted
+          ? target === "player"
+            ? "魔鬼辣椒油生效！你连续失去两杯牛奶。"
+            : "魔鬼辣椒油生效！领导连续失去两杯牛奶。"
+          : target === "player"
+            ? "超级无敌辣椒。你的表情管理出现严重漏洞。"
+            : "超级无敌辣椒。领导的标准笑容松动了。",
+      );
+    } else {
+      this.tone(430, 0.08, "sine");
+      this.setMessage(
+        target === "player"
+          ? "普通甜椒。你甚至尝到了少许清甜。"
+          : "普通甜椒。领导礼貌地咀嚼了七次。",
+      );
+    }
+    this.updateHud();
+
+    this.time.delayedCall(900, () => {
+      food.consumed = true;
+      this.dealerKnowledge.delete(food.id);
+      this.servedFoodId = null;
+      this.selectedFoodId = null;
+      this.renderFoods();
       this.updateHud();
 
-      this.time.delayedCall(900, () => {
-        food.consumed = true;
-        this.dealerKnowledge.delete(food.id);
-        this.servedFoodId = null;
-        this.selectedFoodId = null;
-        this.renderFoods();
-        this.updateHud();
+      if (this.playerHealth <= 0) {
+        this.finishGame("lost");
+        return;
+      }
+      if (this.dealerHealth <= 0) {
+        this.finishGame("won");
+        return;
+      }
+      if (this.finishRoundIfEmpty()) return;
 
-        if (this.playerHealth <= 0) {
-          this.finishGame("lost");
-          return;
+      this.phase = "resolving";
+      this.turnText.setText("服务员正在上菜");
+      this.setMessage("空盆被端走。服务员从固定队列中端来下一盆……");
+      this.renderItemSlots();
+      this.time.delayedCall(650, () => {
+        this.serveNextFood();
+        if (resolution.nextActor === "player") {
+          this.beginPlayerTurn(resolution.extraTurn);
+        } else {
+          this.beginAiTurn(resolution.extraTurn);
         }
-        if (this.dealerHealth <= 0) {
-          this.finishGame("won");
-          return;
-        }
-        if (this.finishRoundIfEmpty()) return;
-
-        this.phase = "resolving";
-        this.turnText.setText("服务员正在上菜");
-        this.setMessage("空盆被端走。服务员从固定队列中端来下一盆……");
-        this.renderItemSlots();
-        this.time.delayedCall(650, () => {
-          this.serveNextFood();
-          if (resolution.nextActor === "player") {
-            this.beginPlayerTurn(resolution.extraTurn);
-          } else {
-            this.beginAiTurn(resolution.extraTurn);
-          }
-        });
       });
     });
   }
@@ -1069,6 +1354,7 @@ export class BanquetScene extends Phaser.Scene {
 
   private useDealerItem(item: ItemInstance, effectId: string, current: Food) {
     if (effectId === "peek-food") {
+      this.playItemSound(effectId);
       this.setMessage("领导用袖口挡住视线，拿牙签悄悄挑开了餐盖……");
       this.tone(205, 0.08, "triangle");
       this.time.delayedCall(700, () => {
@@ -1087,6 +1373,7 @@ export class BanquetScene extends Phaser.Scene {
         return;
       }
       this.pendingSpicyDamage = armed.pendingDamage;
+      this.playItemSound(effectId);
       this.consumeDealerItem(item);
       this.updateSpicyOilHud();
       this.setMessage("领导把魔鬼辣椒油倒进了公用蘸碟。下一颗超级辣椒将造成双倍伤害。");
@@ -1102,6 +1389,7 @@ export class BanquetScene extends Phaser.Scene {
         return;
       }
       this.foods = swap.entries;
+      this.playItemSound(effectId);
       this.servedFoodId = swap.servedId;
       this.selectedFoodId = this.servedFoodId;
       this.consumeDealerItem(item);
@@ -1113,6 +1401,7 @@ export class BanquetScene extends Phaser.Scene {
     }
 
     if (effectId === "discard-current-food") {
+      this.playItemSound(effectId);
       current.revealed = true;
       this.renderFoods();
       this.setMessage(
@@ -1152,7 +1441,8 @@ export class BanquetScene extends Phaser.Scene {
 
   private playSpicyReaction(target: Target, damage = BASE_SPICY_DAMAGE) {
     const boosted = damage > BASE_SPICY_DAMAGE;
-    this.tone(boosted ? 52 : 72, boosted ? 0.42 : 0.28, "sawtooth");
+    this.playFireSound(boosted);
+    this.playPaperFireBurst(target, boosted);
     this.cameras.main.shake(
       boosted ? 420 : 280,
       (target === "player" ? 0.014 : 0.009) * (boosted ? 1.45 : 1),
@@ -1170,13 +1460,49 @@ export class BanquetScene extends Phaser.Scene {
         repeat: 4,
       });
       this.dealerCaption.setText(this.dealerHealth === 1 ? "笑容正在冒烟的领导" : "努力维持标准笑容的领导");
+    } else {
+      this.tweens.add({
+        targets: this.playerHands,
+        x: { from: -12, to: 12 },
+        y: { from: -8, to: 7 },
+        duration: 48,
+        yoyo: true,
+        repeat: boosted ? 6 : 4,
+        onComplete: () => this.playerHands.setPosition(0, 0),
+      });
     }
   }
 
   private finishGame(result: "won" | "lost") {
     this.phase = result;
     this.turnText.setText(result === "won" ? "宴会结束" : "表情管理失败");
-    this.showResult(result);
+    this.restartButton.setVisible(false);
+    this.targetPanel.setVisible(false);
+    this.renderItemSlots();
+    if (result === "won") {
+      this.setMessage("领导连人带标准笑容，正在礼貌而迅速地退出宴会厅……");
+      this.tone(74, 0.36, "sawtooth", 0.028);
+      this.tweens.add({
+        targets: this.dealerSilhouette,
+        x: WIDTH + 330,
+        angle: 7,
+        duration: 720,
+        ease: "Back.In",
+        onComplete: () => this.showResult(result),
+      });
+    } else {
+      this.setMessage("你的双手决定先于本人离席。表情管理宣告失败……");
+      this.tone(86, 0.42, "square", 0.025);
+      this.tweens.add({
+        targets: this.playerHands,
+        y: 220,
+        angle: -4,
+        alpha: 0.2,
+        duration: 620,
+        ease: "Cubic.In",
+        onComplete: () => this.showResult(result),
+      });
+    }
   }
 
   private showResult(result: "won" | "lost") {
@@ -1244,16 +1570,77 @@ export class BanquetScene extends Phaser.Scene {
     const AudioContextClass =
       window.AudioContext ||
       (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (AudioContextClass) this.audioContext = new AudioContextClass();
+    if (AudioContextClass) {
+      this.audioContext = new AudioContextClass();
+      if (this.audioContext.state === "suspended") void this.audioContext.resume();
+    }
   }
 
-  private tone(frequency: number, duration: number, type: OscillatorType) {
+  private playClocheSound() {
+    this.tone(760, 0.07, "triangle", 0.025);
+    this.time.delayedCall(55, () => this.tone(415, 0.11, "square", 0.018));
+    this.noiseBurst(0.09, 0.018, 1500);
+  }
+
+  private playSwallowSound() {
+    this.tone(310, 0.055, "triangle", 0.02);
+    this.time.delayedCall(85, () => this.tone(185, 0.09, "sine", 0.026));
+  }
+
+  private playFireSound(boosted: boolean) {
+    this.tone(boosted ? 48 : 67, boosted ? 0.46 : 0.31, "sawtooth", boosted ? 0.045 : 0.035);
+    this.noiseBurst(boosted ? 0.48 : 0.32, boosted ? 0.045 : 0.032, boosted ? 720 : 980);
+    this.time.delayedCall(70, () => this.tone(boosted ? 96 : 124, 0.18, "square", 0.018));
+  }
+
+  private playMilkSound() {
+    this.tone(390, 0.055, "sine", 0.018);
+    this.time.delayedCall(55, () => this.tone(285, 0.09, "sine", 0.022));
+    this.time.delayedCall(130, () => this.tone(205, 0.08, "triangle", 0.016));
+  }
+
+  private playItemSound(effectId: string) {
+    const frequency =
+      effectId === "peek-food"
+        ? 540
+        : effectId === "swap-next-food"
+          ? 330
+          : effectId === "discard-current-food"
+            ? 215
+            : 92;
+    this.tone(frequency, 0.09, effectId === "boost-next-spicy" ? "sawtooth" : "triangle", 0.024);
+    this.time.delayedCall(60, () => this.tone(frequency * 0.72, 0.07, "square", 0.012));
+  }
+
+  private noiseBurst(duration: number, volume: number, filterFrequency: number) {
     if (!this.audioContext) return;
+    if (this.audioContext.state === "suspended") void this.audioContext.resume();
+    const frameCount = Math.max(1, Math.floor(this.audioContext.sampleRate * duration));
+    const buffer = this.audioContext.createBuffer(1, frameCount, this.audioContext.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let index = 0; index < frameCount; index += 1) data[index] = Math.random() * 2 - 1;
+    const source = this.audioContext.createBufferSource();
+    const filter = this.audioContext.createBiquadFilter();
+    const gain = this.audioContext.createGain();
+    filter.type = "lowpass";
+    filter.frequency.value = filterFrequency;
+    gain.gain.setValueAtTime(volume, this.audioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime + duration);
+    source.buffer = buffer;
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.audioContext.destination);
+    source.start();
+  }
+
+  private tone(frequency: number, duration: number, type: OscillatorType, volume = 0.028) {
+    if (!this.audioContext) return;
+    if (this.audioContext.state === "suspended") void this.audioContext.resume();
     const oscillator = this.audioContext.createOscillator();
     const gain = this.audioContext.createGain();
     oscillator.type = type;
     oscillator.frequency.value = frequency;
-    gain.gain.setValueAtTime(0.028, this.audioContext.currentTime);
+    gain.gain.setValueAtTime(volume, this.audioContext.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime + duration);
     oscillator.connect(gain);
     gain.connect(this.audioContext.destination);

@@ -8,6 +8,7 @@ body,
   width: 100%;
   min-height: 100%;
   margin: 0;
+  overscroll-behavior: none;
 }
 
 body {
@@ -20,8 +21,13 @@ body {
 #game {
   width: 100vw;
   height: 100svh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 #game::before {
@@ -39,6 +45,30 @@ body {
   max-width: 100%;
   max-height: 100%;
   box-shadow: 0 0 90px rgba(0, 0, 0, 0.9);
+  touch-action: none;
+}
+
+.orientation-hint {
+  display: none;
+  position: fixed;
+  z-index: 3;
+  right: 12px;
+  bottom: 10px;
+  margin: 0;
+  padding: 7px 10px;
+  color: rgba(255, 231, 190, 0.82);
+  background: rgba(20, 5, 4, 0.78);
+  border: 1px solid rgba(176, 91, 56, 0.6);
+  border-radius: 3px;
+  font: 700 11px/1.25 monospace;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+}
+
+@media (orientation: portrait) and (max-width: 900px) {
+  .orientation-hint {
+    display: block;
+  }
 }
 
 .screen-reader-instructions {
