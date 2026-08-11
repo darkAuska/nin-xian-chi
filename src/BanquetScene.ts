@@ -1,4 +1,5 @@
 import * as Phaser from "phaser";
+import { chooseDealerAction, type FoodKnowledge } from "./aiStrategy";
 import {
   armSpicyOil,
   BASE_SPICY_DAMAGE,
@@ -21,6 +22,7 @@ import {
   MAX_ITEMS_PER_ACTION,
   removeItemInstance,
   type ItemInstance,
+  type ItemOwner,
 } from "./items";
 
 type Phase =
@@ -64,7 +66,8 @@ export class BanquetScene extends Phaser.Scene {
   private pendingSpicyDamage = BASE_SPICY_DAMAGE;
   private playerItems: ItemInstance[] = [];
   private dealerItems: ItemInstance[] = [];
-  private itemsUsedThisAction = 0;
+  private itemUsesThisAction: Record<ItemOwner, number> = { player: 0, dealer: 0 };
+  private dealerKnowledge = new Map<number, boolean>();
   private activeItem: ItemInstance | null = null;
   private itemTargetIds: number[] = [];
   private readonly itemEffectHandlers = new Map<
@@ -312,14 +315,14 @@ export class BanquetScene extends Phaser.Scene {
     const canInteract =
       player &&
       (this.phase === "player-target" || this.phase === "player-item-target") &&
-      canUseAnotherItem(this.itemsUsedThisAction);
+      canUseAnotherItem(this.itemUsesThisAction.player);
     const label = this.add
       .text(
         player ? 0 : -4,
         player ? -31 : -27,
         player
-          ? `你的道具 · 本次还可用 ${Math.max(0, MAX_ITEMS_PER_ACTION - this.itemsUsedThisAction)} 件`
-          : "领导的道具",
+          ? `你的道具 · 本次还可用 ${Math.max(0, MAX_ITEMS_PER_ACTION - this.itemUsesThisAction.player)} 件`
+          : `领导的道具 · 已用 ${this.itemUsesThisAction.dealer}/${MAX_ITEMS_PER_ACTION}`,
         {
           fontFamily: "monospace",
           fontSize: "10px",
@@ -494,7 +497,8 @@ export class BanquetScene extends Phaser.Scene {
     this.servedFoodId = null;
     this.playerItems = [];
     this.dealerItems = [];
-    this.itemsUsedThisAction = 0;
+    this.itemUsesThisAction = { player: 0, dealer: 0 };
+    this.dealerKnowledge.clear();
     this.pendingSpicyDamage = BASE_SPICY_DAMAGE;
     this.activeItem = null;
     this.itemTargetIds = [];
@@ -512,7 +516,8 @@ export class BanquetScene extends Phaser.Scene {
     this.servedFoodId = null;
     this.activeItem = null;
     this.itemTargetIds = [];
-    this.itemsUsedThisAction = 0;
+    this.itemUsesThisAction = { player: 0, dealer: 0 };
+    this.dealerKnowledge.clear();
     this.pendingSpicyDamage = BASE_SPICY_DAMAGE;
     this.playerItems = grantRandomItems(this.round, "player");
     this.dealerItems = grantRandomItems(this.round, "dealer");
@@ -681,7 +686,7 @@ export class BanquetScene extends Phaser.Scene {
         food.revealed = wasRevealed;
         this.consumePlayerItem(item);
         this.resumePlayerChoice(
-          canUseAnotherItem(this.itemsUsedThisAction)
+          canUseAnotherItem(this.itemUsesThisAction.player)
             ? "餐盖重新盖好了。你还可以使用道具，或决定谁吃眼前这盆。"
             : "餐盖重新盖好了。本次道具额度已用完，请决定谁吃眼前这盆。",
         );
@@ -705,7 +710,7 @@ export class BanquetScene extends Phaser.Scene {
       this.time.delayedCall(650, () => {
         this.consumePlayerItem(item);
         this.resumePlayerChoice(
-          canUseAnotherItem(this.itemsUsedThisAction)
+          canUseAnotherItem(this.itemUsesThisAction.player)
             ? "交换完成。你还可以使用道具，或决定谁吃换上来的这一盆。"
             : "交换完成。本次道具额度已用完，请决定谁吃换上来的这一盆。",
         );
@@ -738,6 +743,7 @@ export class BanquetScene extends Phaser.Scene {
         }
 
         this.foods = discard.entries;
+        if (discard.discardedId !== null) this.dealerKnowledge.delete(discard.discardedId);
         this.consumePlayerItem(item);
         this.servedFoodId = null;
         this.selectedFoodId = null;
@@ -751,7 +757,7 @@ export class BanquetScene extends Phaser.Scene {
         this.time.delayedCall(650, () => {
           this.serveNextFood();
           this.resumePlayerChoice(
-            canUseAnotherItem(this.itemsUsedThisAction)
+            canUseAnotherItem(this.itemUsesThisAction.player)
               ? `${this.servingLabel()}已经上桌。你还可以使用道具，或决定谁吃。`
               : `${this.servingLabel()}已经上桌。本次道具额度已用完，请决定谁吃。`,
           );
@@ -777,7 +783,7 @@ export class BanquetScene extends Phaser.Scene {
 
       this.time.delayedCall(650, () => {
         this.resumePlayerChoice(
-          canUseAnotherItem(this.itemsUsedThisAction)
+          canUseAnotherItem(this.itemUsesThisAction.player)
             ? "辣椒油效果正在等待触发。你还可以使用道具，或决定谁吃眼前这盆。"
             : "辣椒油效果正在等待触发。本次道具额度已用完，请决定谁吃。",
         );
@@ -792,7 +798,7 @@ export class BanquetScene extends Phaser.Scene {
       this.cancelActiveItem("已收起道具。你可以换一件，或直接决定谁吃眼前这盆。");
       return;
     }
-    if (!canUseAnotherItem(this.itemsUsedThisAction)) {
+    if (!canUseAnotherItem(this.itemUsesThisAction.player)) {
       this.cancelActiveItem("本次最多使用两件道具，请选择一份食物。");
       return;
     }
@@ -859,7 +865,7 @@ export class BanquetScene extends Phaser.Scene {
 
   private consumePlayerItem(item: ItemInstance) {
     this.playerItems = removeItemInstance(this.playerItems, item.instanceId);
-    this.itemsUsedThisAction += 1;
+    this.itemUsesThisAction.player += 1;
     this.activeItem = null;
     this.itemTargetIds = [];
   }
@@ -956,6 +962,7 @@ export class BanquetScene extends Phaser.Scene {
 
       this.time.delayedCall(900, () => {
         food.consumed = true;
+        this.dealerKnowledge.delete(food.id);
         this.servedFoodId = null;
         this.selectedFoodId = null;
         this.renderFoods();
@@ -992,7 +999,7 @@ export class BanquetScene extends Phaser.Scene {
     this.selectedFoodId = this.servedFoodId;
     this.activeItem = null;
     this.itemTargetIds = [];
-    this.itemsUsedThisAction = 0;
+    this.itemUsesThisAction.player = 0;
     this.targetPanel.setVisible(true);
     this.renderFoods();
     this.renderItemSlots();
@@ -1010,6 +1017,7 @@ export class BanquetScene extends Phaser.Scene {
     this.selectedFoodId = this.servedFoodId;
     this.activeItem = null;
     this.itemTargetIds = [];
+    this.itemUsesThisAction.dealer = 0;
     this.targetPanel.setVisible(false);
     this.renderFoods();
     this.renderItemSlots();
@@ -1020,21 +1028,152 @@ export class BanquetScene extends Phaser.Scene {
         : `服务员端上${this.servingLabel()}。领导正在进行风险评估……`,
     );
 
-    this.time.delayedCall(800, () => {
-      if (this.phase !== "ai-turn") return;
-      const remaining = this.foods.filter((food) => !food.consumed);
-      const spicyLeft = remaining.filter((food) => food.spicy).length;
-      const safeProbability = remaining.length === 0 ? 0 : (remaining.length - spicyLeft) / remaining.length;
-      const selected = remaining.find((food) => food.id === this.servedFoodId);
-      if (!selected) return;
-      const confidenceWobble = Phaser.Math.FloatBetween(-0.08, 0.08);
-      const target: Target = safeProbability + confidenceWobble >= 0.58 ? "dealer" : "player";
+    this.time.delayedCall(800, () => this.runDealerTurn());
+  }
 
-      this.selectedFoodId = selected.id;
-      this.renderFoods();
-      this.setMessage(target === "dealer" ? "领导决定以身作则。" : "领导微笑着把餐盖推向了你。 ");
-      this.time.delayedCall(650, () => this.resolveChoice("dealer", target, selected.id));
+  private dealerKnowledgeFor(foodId: number | null): FoodKnowledge {
+    if (foodId === null || !this.dealerKnowledge.has(foodId)) return null;
+    return this.dealerKnowledge.get(foodId) ? "spicy" : "safe";
+  }
+
+  private runDealerTurn() {
+    if (this.phase !== "ai-turn") return;
+    const remaining = this.foods.filter((food) => !food.consumed);
+    const current = remaining.find((food) => food.id === this.servedFoodId);
+    if (!current) return;
+    const currentIndex = this.foods.findIndex((food) => food.id === current.id);
+    const next = this.foods.find((food, index) => index > currentIndex && !food.consumed);
+    const spicyLeft = remaining.filter((food) => food.spicy).length;
+    const safeProbability =
+      remaining.length === 0 ? 0 : (remaining.length - spicyLeft) / remaining.length;
+    const availableEffectIds = this.dealerItems.map(
+      (item) => getItemDefinition(item.definitionId).effectId,
+    );
+    const action = chooseDealerAction({
+      currentKnowledge: this.dealerKnowledgeFor(current.id),
+      nextKnowledge: this.dealerKnowledgeFor(next?.id ?? null),
+      safeProbability,
+      dealerHealth: this.dealerHealth,
+      playerHealth: this.playerHealth,
+      oilArmed: this.pendingSpicyDamage > BASE_SPICY_DAMAGE,
+      canUseItem: canUseAnotherItem(this.itemUsesThisAction.dealer),
+      availableEffectIds,
     });
+
+    if (action.type === "use-item") {
+      const item = this.dealerItems.find(
+        (candidate) => getItemDefinition(candidate.definitionId).effectId === action.effectId,
+      );
+      if (item) {
+        this.useDealerItem(item, action.effectId, current);
+        return;
+      }
+      this.time.delayedCall(250, () => this.runDealerTurn());
+      return;
+    }
+
+    this.selectedFoodId = current.id;
+    this.renderFoods();
+    const knowledge = this.dealerKnowledgeFor(current.id);
+    this.setMessage(
+      knowledge === null
+        ? action.target === "dealer"
+          ? "领导根据剩余比例，决定以身作则。"
+          : "领导根据剩余比例，微笑着把餐盖推向了你。"
+        : action.target === "dealer"
+          ? "领导看起来很有把握，决定自己吃。"
+          : "领导看起来很有把握，把餐盖推向了你。",
+    );
+    this.time.delayedCall(650, () => this.resolveChoice("dealer", action.target, current.id));
+  }
+
+  private consumeDealerItem(item: ItemInstance) {
+    this.dealerItems = removeItemInstance(this.dealerItems, item.instanceId);
+    this.itemUsesThisAction.dealer += 1;
+    this.renderItemSlots();
+  }
+
+  private useDealerItem(item: ItemInstance, effectId: string, current: Food) {
+    if (effectId === "peek-food") {
+      this.setMessage("领导用袖口挡住视线，拿牙签悄悄挑开了餐盖……");
+      this.tone(205, 0.08, "triangle");
+      this.time.delayedCall(700, () => {
+        this.dealerKnowledge.set(current.id, current.spicy);
+        this.consumeDealerItem(item);
+        this.setMessage("领导已经看清了，但你什么也没看见。");
+        this.time.delayedCall(520, () => this.runDealerTurn());
+      });
+      return;
+    }
+
+    if (effectId === "boost-next-spicy") {
+      const armed = armSpicyOil(this.pendingSpicyDamage);
+      if (!armed.armed) {
+        this.time.delayedCall(250, () => this.runDealerTurn());
+        return;
+      }
+      this.pendingSpicyDamage = armed.pendingDamage;
+      this.consumeDealerItem(item);
+      this.updateSpicyOilHud();
+      this.setMessage("领导把魔鬼辣椒油倒进了公用蘸碟。下一颗超级辣椒将造成双倍伤害。");
+      this.tone(82, 0.22, "sawtooth");
+      this.time.delayedCall(700, () => this.runDealerTurn());
+      return;
+    }
+
+    if (effectId === "swap-next-food") {
+      const swap = swapServedWithNext(this.foods, this.servedFoodId);
+      if (!swap.swapped) {
+        this.time.delayedCall(250, () => this.runDealerTurn());
+        return;
+      }
+      this.foods = swap.entries;
+      this.servedFoodId = swap.servedId;
+      this.selectedFoodId = this.servedFoodId;
+      this.consumeDealerItem(item);
+      this.renderFoods();
+      this.setMessage("领导用公筷交换了眼前这盆和下一盆。交换过程对双方公开。");
+      this.tone(225, 0.08, "square");
+      this.time.delayedCall(700, () => this.runDealerTurn());
+      return;
+    }
+
+    if (effectId === "discard-current-food") {
+      current.revealed = true;
+      this.renderFoods();
+      this.setMessage(
+        current.spicy
+          ? "领导打开打包盒：一盆超级无敌辣椒被公开装走。"
+          : "领导打开打包盒：一盆普通甜椒被公开装走。",
+      );
+      this.tone(current.spicy ? 145 : 360, 0.1, "triangle");
+      this.time.delayedCall(850, () => {
+        const discard = discardServedEntry(this.foods, this.servedFoodId);
+        if (!discard.discarded) {
+          this.runDealerTurn();
+          return;
+        }
+        this.foods = discard.entries;
+        if (discard.discardedId !== null) this.dealerKnowledge.delete(discard.discardedId);
+        this.consumeDealerItem(item);
+        this.servedFoodId = null;
+        this.selectedFoodId = null;
+        this.renderFoods();
+        this.updateHud();
+        if (this.finishRoundIfEmpty()) return;
+        this.setMessage("打包盒被带走，服务员继续为领导端来下一盆……");
+        this.time.delayedCall(650, () => {
+          this.serveNextFood();
+          this.selectedFoodId = this.servedFoodId;
+          this.renderFoods();
+          this.setMessage(`${this.servingLabel()}已经上桌，领导继续评估。`);
+          this.time.delayedCall(450, () => this.runDealerTurn());
+        });
+      });
+      return;
+    }
+
+    this.time.delayedCall(250, () => this.runDealerTurn());
   }
 
   private playSpicyReaction(target: Target, damage = BASE_SPICY_DAMAGE) {

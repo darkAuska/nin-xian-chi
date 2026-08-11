@@ -20,4 +20,6 @@ npm run dev
 5. 当前盆结算后，服务员才会端上队列中的下一盆。
 6. 自己吃到普通甜椒可继续行动；吃到超级无敌辣椒会失去一杯牛奶。
 
-完整设计见 [GAME_DESIGN.md](./GAME_DESIGN.md)，分阶段开发路线见 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)，新增道具的方法见 [ITEM_SYSTEM.md](./ITEM_SYSTEM.md)。
+领导会按公开概率和自己用牙签获得的私有信息使用道具，不会读取未知食物的真实身份。
+
+完整设计见 [GAME_DESIGN.md](./GAME_DESIGN.md)，分阶段开发路线见 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)，新增道具的方法见 [ITEM_SYSTEM.md](./ITEM_SYSTEM.md)，AI 公平决策约定见 [AI_STRATEGY.md](./AI_STRATEGY.md)。
