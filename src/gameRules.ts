@@ -24,8 +24,16 @@ export type QueueDiscardResult<T extends ServingQueueEntry> = {
   discarded: boolean;
 };
 
+export type SpicyDamageResolution = {
+  damage: number;
+  nextPendingDamage: number;
+  boosted: boolean;
+};
+
 export const MAX_HEALTH = 3;
 export const FOOD_COUNT = 6;
+export const BASE_SPICY_DAMAGE = 1;
+export const BOOSTED_SPICY_DAMAGE = 2;
 
 export function otherActor(actor: Actor): Actor {
   return actor === "player" ? "dealer" : "player";
@@ -110,5 +118,37 @@ export function discardServedEntry<T extends ServingQueueEntry>(
     entries: nextEntries,
     discardedId: servedId,
     discarded: true,
+  };
+}
+
+export function armSpicyOil(pendingDamage: number): {
+  pendingDamage: number;
+  armed: boolean;
+} {
+  if (pendingDamage > BASE_SPICY_DAMAGE) {
+    return { pendingDamage, armed: false };
+  }
+  return { pendingDamage: BOOSTED_SPICY_DAMAGE, armed: true };
+}
+
+export function resolveSpicyDamage(
+  spicy: boolean,
+  pendingDamage: number,
+): SpicyDamageResolution {
+  const normalizedDamage = Math.min(
+    BOOSTED_SPICY_DAMAGE,
+    Math.max(BASE_SPICY_DAMAGE, Math.floor(pendingDamage)),
+  );
+  if (!spicy) {
+    return {
+      damage: 0,
+      nextPendingDamage: normalizedDamage,
+      boosted: false,
+    };
+  }
+  return {
+    damage: normalizedDamage,
+    nextPendingDamage: BASE_SPICY_DAMAGE,
+    boosted: normalizedDamage > BASE_SPICY_DAMAGE,
   };
 }

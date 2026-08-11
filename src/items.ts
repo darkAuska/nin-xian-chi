@@ -101,3 +101,14 @@ registerItemDefinition({
   targetPrompt: "",
   tint: 0xb7c6a1,
 });
+
+registerItemDefinition({
+  id: "devil-chili-oil",
+  name: "魔鬼辣椒油",
+  shortLabel: "油",
+  description: "让下一颗真正被吃掉的超级辣椒造成双倍伤害。",
+  effectId: "boost-next-spicy",
+  foodTargetCount: 0,
+  targetPrompt: "",
+  tint: 0xe5401d,
+});

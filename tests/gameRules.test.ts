@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  armSpicyOil,
+  BASE_SPICY_DAMAGE,
+  BOOSTED_SPICY_DAMAGE,
   createRoundFoodFlags,
   discardServedEntry,
   FOOD_COUNT,
   nextServingId,
   resolveTurn,
+  resolveSpicyDamage,
   spicyCountForRound,
   swapServedWithNext,
 } from "../src/gameRules.ts";
@@ -112,4 +116,31 @@ test("a takeout box cannot discard a missing or already consumed serving", () =>
   const queue = [{ id: 0, consumed: true }];
   assert.equal(discardServedEntry(queue, 0).discarded, false);
   assert.equal(discardServedEntry(queue, null).discarded, false);
+});
+
+test("chili oil can be armed once but cannot stack", () => {
+  assert.deepEqual(armSpicyOil(BASE_SPICY_DAMAGE), {
+    pendingDamage: BOOSTED_SPICY_DAMAGE,
+    armed: true,
+  });
+  assert.deepEqual(armSpicyOil(BOOSTED_SPICY_DAMAGE), {
+    pendingDamage: BOOSTED_SPICY_DAMAGE,
+    armed: false,
+  });
+});
+
+test("safe food does not consume pending chili oil", () => {
+  assert.deepEqual(resolveSpicyDamage(false, BOOSTED_SPICY_DAMAGE), {
+    damage: 0,
+    nextPendingDamage: BOOSTED_SPICY_DAMAGE,
+    boosted: false,
+  });
+});
+
+test("the next spicy food consumes chili oil and deals double damage", () => {
+  assert.deepEqual(resolveSpicyDamage(true, BOOSTED_SPICY_DAMAGE), {
+    damage: BOOSTED_SPICY_DAMAGE,
+    nextPendingDamage: BASE_SPICY_DAMAGE,
+    boosted: true,
+  });
 });

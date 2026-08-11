@@ -33,6 +33,12 @@ test("the takeout box is registered as an immediate discard item", () => {
   assert.equal(item.foodTargetCount, 0);
 });
 
+test("devil chili oil is registered as an immediate persistent effect", () => {
+  const item = getItemDefinition("devil-chili-oil");
+  assert.equal(item.effectId, "boost-next-spicy");
+  assert.equal(item.foodTargetCount, 0);
+});
+
 test("only two items may be used during one action", () => {
   assert.equal(canUseAnotherItem(0), true);
   assert.equal(canUseAnotherItem(1), true);

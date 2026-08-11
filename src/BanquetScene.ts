@@ -1,9 +1,12 @@
 import * as Phaser from "phaser";
 import {
+  armSpicyOil,
+  BASE_SPICY_DAMAGE,
   createRoundFoodFlags,
   discardServedEntry,
   MAX_HEALTH,
   nextServingId,
+  resolveSpicyDamage,
   resolveTurn,
   spicyCountForRound,
   swapServedWithNext,
@@ -58,6 +61,7 @@ export class BanquetScene extends Phaser.Scene {
   private round = 0;
   private selectedFoodId: number | null = null;
   private servedFoodId: number | null = null;
+  private pendingSpicyDamage = BASE_SPICY_DAMAGE;
   private playerItems: ItemInstance[] = [];
   private dealerItems: ItemInstance[] = [];
   private itemsUsedThisAction = 0;
@@ -70,6 +74,7 @@ export class BanquetScene extends Phaser.Scene {
   private statusText!: Phaser.GameObjects.Text;
   private roundText!: Phaser.GameObjects.Text;
   private remainingText!: Phaser.GameObjects.Text;
+  private spicyOilText!: Phaser.GameObjects.Text;
   private turnText!: Phaser.GameObjects.Text;
   private dealerCaption!: Phaser.GameObjects.Text;
   private playerMilk!: Phaser.GameObjects.Container;
@@ -228,6 +233,18 @@ export class BanquetScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(30);
+
+    this.spicyOilText = this.add
+      .text(WIDTH / 2, 187, "魔鬼辣椒油待触发 · 下一颗超级辣椒造成 2 点伤害", {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#ff7045",
+        backgroundColor: "#3c0b06",
+        padding: { x: 10, y: 5 },
+      })
+      .setOrigin(0.5)
+      .setDepth(32)
+      .setVisible(false);
 
     this.dealerCaption = this.add
       .text(WIDTH / 2, 328, "笑容过于标准的领导", {
@@ -478,11 +495,13 @@ export class BanquetScene extends Phaser.Scene {
     this.playerItems = [];
     this.dealerItems = [];
     this.itemsUsedThisAction = 0;
+    this.pendingSpicyDamage = BASE_SPICY_DAMAGE;
     this.activeItem = null;
     this.itemTargetIds = [];
     this.clearFoods();
     this.drawMilkRows();
     this.renderItemSlots();
+    this.updateSpicyOilHud();
     this.prepareRound();
   }
 
@@ -494,10 +513,12 @@ export class BanquetScene extends Phaser.Scene {
     this.activeItem = null;
     this.itemTargetIds = [];
     this.itemsUsedThisAction = 0;
+    this.pendingSpicyDamage = BASE_SPICY_DAMAGE;
     this.playerItems = grantRandomItems(this.round, "player");
     this.dealerItems = grantRandomItems(this.round, "dealer");
     this.targetPanel.setVisible(false);
     this.renderItemSlots();
+    this.updateSpicyOilHud();
 
     const spicyCount = spicyCountForRound(this.round);
     const safeCount = 6 - spicyCount;
@@ -737,6 +758,31 @@ export class BanquetScene extends Phaser.Scene {
         });
       });
     });
+
+    this.itemEffectHandlers.set("boost-next-spicy", (item) => {
+      const armed = armSpicyOil(this.pendingSpicyDamage);
+      if (!armed.armed) {
+        this.cancelActiveItem("魔鬼辣椒油已经在桌上了，不能继续叠加。");
+        return;
+      }
+
+      this.pendingSpicyDamage = armed.pendingDamage;
+      this.consumePlayerItem(item);
+      this.updateSpicyOilHud();
+      this.renderItemSlots();
+      this.flash.setFillStyle(0xff4a18, 0.22).setAlpha(0.22);
+      this.tweens.add({ targets: this.flash, alpha: 0, duration: 460, ease: "Quad.Out" });
+      this.setMessage("魔鬼辣椒油已经倒进公用蘸碟：下一颗被吃掉的超级辣椒造成双倍伤害。");
+      this.tone(82, 0.22, "sawtooth");
+
+      this.time.delayedCall(650, () => {
+        this.resumePlayerChoice(
+          canUseAnotherItem(this.itemsUsedThisAction)
+            ? "辣椒油效果正在等待触发。你还可以使用道具，或决定谁吃眼前这盆。"
+            : "辣椒油效果正在等待触发。本次道具额度已用完，请决定谁吃。",
+        );
+      });
+    });
   }
 
   private activatePlayerItem(instanceId: string) {
@@ -864,6 +910,9 @@ export class BanquetScene extends Phaser.Scene {
     const food = this.foods.find((candidate) => candidate.id === foodId);
     if (!food || food.consumed || this.phase === "resolving") return;
     const resolution = resolveTurn(actor, target, food.spicy);
+    const spicyDamage = resolveSpicyDamage(food.spicy, this.pendingSpicyDamage);
+    this.pendingSpicyDamage = spicyDamage.nextPendingDamage;
+    this.updateSpicyOilHud();
 
     this.phase = "resolving";
     this.targetPanel.setVisible(false);
@@ -879,13 +928,20 @@ export class BanquetScene extends Phaser.Scene {
 
     this.time.delayedCall(650, () => {
       if (resolution.damageTo) {
-        if (resolution.damageTo === "player") this.playerHealth = Math.max(0, this.playerHealth - 1);
-        else this.dealerHealth = Math.max(0, this.dealerHealth - 1);
-        this.playSpicyReaction(resolution.damageTo);
+        if (resolution.damageTo === "player") {
+          this.playerHealth = Math.max(0, this.playerHealth - spicyDamage.damage);
+        } else {
+          this.dealerHealth = Math.max(0, this.dealerHealth - spicyDamage.damage);
+        }
+        this.playSpicyReaction(resolution.damageTo, spicyDamage.damage);
         this.setMessage(
-          target === "player"
-            ? "超级无敌辣椒。你的表情管理出现严重漏洞。"
-            : "超级无敌辣椒。领导的标准笑容松动了。",
+          spicyDamage.boosted
+            ? target === "player"
+              ? "魔鬼辣椒油生效！你连续失去两杯牛奶。"
+              : "魔鬼辣椒油生效！领导连续失去两杯牛奶。"
+            : target === "player"
+              ? "超级无敌辣椒。你的表情管理出现严重漏洞。"
+              : "超级无敌辣椒。领导的标准笑容松动了。",
         );
       } else {
         this.tone(430, 0.08, "sine");
@@ -981,10 +1037,15 @@ export class BanquetScene extends Phaser.Scene {
     });
   }
 
-  private playSpicyReaction(target: Target) {
-    this.tone(72, 0.28, "sawtooth");
-    this.cameras.main.shake(280, target === "player" ? 0.014 : 0.009);
-    this.flash.setAlpha(target === "player" ? 0.48 : 0.3);
+  private playSpicyReaction(target: Target, damage = BASE_SPICY_DAMAGE) {
+    const boosted = damage > BASE_SPICY_DAMAGE;
+    this.tone(boosted ? 52 : 72, boosted ? 0.42 : 0.28, "sawtooth");
+    this.cameras.main.shake(
+      boosted ? 420 : 280,
+      (target === "player" ? 0.014 : 0.009) * (boosted ? 1.45 : 1),
+    );
+    this.flash.setFillStyle(0xff2a12, boosted ? 0.62 : 0.48);
+    this.flash.setAlpha((target === "player" ? 0.48 : 0.3) * (boosted ? 1.25 : 1));
     this.tweens.add({ targets: this.flash, alpha: 0, duration: 420, ease: "Quad.Out" });
 
     if (target === "dealer") {
@@ -1055,6 +1116,10 @@ export class BanquetScene extends Phaser.Scene {
     this.remainingText.setText(
       remaining.length > 0 ? `剩余：普通甜椒 ${safe}  ·  超级无敌辣椒 ${spicy}` : "本轮餐盘已空",
     );
+  }
+
+  private updateSpicyOilHud() {
+    this.spicyOilText?.setVisible(this.pendingSpicyDamage > BASE_SPICY_DAMAGE);
   }
 
   private setMessage(message: string) {
