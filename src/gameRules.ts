@@ -7,6 +7,17 @@ export type TurnResolution = {
   nextActor: Actor;
 };
 
+export type ServingQueueEntry = {
+  id: number;
+  consumed: boolean;
+};
+
+export type QueueSwapResult<T extends ServingQueueEntry> = {
+  entries: T[];
+  servedId: number | null;
+  swapped: boolean;
+};
+
 export const MAX_HEALTH = 3;
 export const FOOD_COUNT = 6;
 
@@ -41,4 +52,34 @@ export function createRoundFoodFlags(round: number, random: () => number = Math.
   }
 
   return flags;
+}
+
+export function nextServingId<T extends ServingQueueEntry>(entries: T[]): number | null {
+  return entries.find((entry) => !entry.consumed)?.id ?? null;
+}
+
+export function swapServedWithNext<T extends ServingQueueEntry>(
+  entries: T[],
+  servedId: number | null,
+): QueueSwapResult<T> {
+  const nextEntries = [...entries];
+  const currentIndex = nextEntries.findIndex(
+    (entry) => entry.id === servedId && !entry.consumed,
+  );
+  const nextIndex = nextEntries.findIndex(
+    (entry, index) => index > currentIndex && !entry.consumed,
+  );
+  if (currentIndex < 0 || nextIndex < 0) {
+    return { entries: nextEntries, servedId, swapped: false };
+  }
+
+  [nextEntries[currentIndex], nextEntries[nextIndex]] = [
+    nextEntries[nextIndex],
+    nextEntries[currentIndex],
+  ];
+  return {
+    entries: nextEntries,
+    servedId: nextEntries[currentIndex].id,
+    swapped: true,
+  };
 }

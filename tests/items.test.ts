@@ -21,6 +21,12 @@ test("granted item instances have stable unique ids and registered definitions",
   items.forEach((item) => assert.equal(getItemDefinition(item.definitionId).id, "toothpick"));
 });
 
+test("the chopsticks are registered as an immediate queue-swap item", () => {
+  const item = getItemDefinition("serving-chopsticks");
+  assert.equal(item.effectId, "swap-next-food");
+  assert.equal(item.foodTargetCount, 0);
+});
+
 test("only two items may be used during one action", () => {
   assert.equal(canUseAnotherItem(0), true);
   assert.equal(canUseAnotherItem(1), true);

@@ -76,6 +76,17 @@ registerItemDefinition({
   description: "私下查看一个餐盖里的食物，然后重新盖好。",
   effectId: "peek-food",
   foodTargetCount: 1,
-  targetPrompt: "选择一个餐盖，用牙签悄悄挑开一条缝。",
+  targetPrompt: "点击眼前的餐盖，用牙签悄悄挑开一条缝。",
   tint: 0xd8bd7f,
+});
+
+registerItemDefinition({
+  id: "serving-chopsticks",
+  name: "公筷",
+  shortLabel: "筷",
+  description: "公开交换眼前这一盆和固定队列中的下一盆。",
+  effectId: "swap-next-food",
+  foodTargetCount: 0,
+  targetPrompt: "",
+  tint: 0xc98b52,
 });

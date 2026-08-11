@@ -2,8 +2,10 @@ import * as Phaser from "phaser";
 import {
   createRoundFoodFlags,
   MAX_HEALTH,
+  nextServingId,
   resolveTurn,
   spicyCountForRound,
+  swapServedWithNext,
   type Actor,
   type Target,
 } from "./gameRules";
@@ -20,7 +22,6 @@ import {
 type Phase =
   | "intro"
   | "round-preview"
-  | "player-pick"
   | "player-target"
   | "player-item-target"
   | "resolving"
@@ -45,6 +46,7 @@ const DISH_POSITIONS = [
   { x: 965, y: 438, scale: 0.86 },
   { x: 645, y: 510, scale: 1.08 },
 ];
+const SERVING_POSITION = { x: WIDTH / 2, y: 478, scale: 1.24 };
 
 export class BanquetScene extends Phaser.Scene {
   private phase: Phase = "intro";
@@ -54,6 +56,7 @@ export class BanquetScene extends Phaser.Scene {
   private dealerHealth = MAX_HEALTH;
   private round = 0;
   private selectedFoodId: number | null = null;
+  private servedFoodId: number | null = null;
   private playerItems: ItemInstance[] = [];
   private dealerItems: ItemInstance[] = [];
   private itemsUsedThisAction = 0;
@@ -290,7 +293,7 @@ export class BanquetScene extends Phaser.Scene {
     root.removeAll(true);
     const canInteract =
       player &&
-      (this.phase === "player-pick" || this.phase === "player-item-target") &&
+      (this.phase === "player-target" || this.phase === "player-item-target") &&
       canUseAnotherItem(this.itemsUsedThisAction);
     const label = this.add
       .text(
@@ -359,9 +362,9 @@ export class BanquetScene extends Phaser.Scene {
   }
 
   private createTargetPanel() {
-    this.targetPanel = this.add.container(WIDTH / 2, 630).setDepth(60).setVisible(false);
+    this.targetPanel = this.add.container(WIDTH / 2, 600).setDepth(60).setVisible(false);
     const prompt = this.add
-      .text(0, -47, "这份辣椒，谁先吃？", {
+      .text(0, -47, "眼前这盆，谁先吃？", {
         fontFamily: "serif",
         fontSize: "19px",
         color: "#ffe7b8",
@@ -438,7 +441,7 @@ export class BanquetScene extends Phaser.Scene {
       .text(
         WIDTH / 2,
         365,
-        "① 选择一个餐盖\n② 决定自己吃，还是请领导吃\n③ 自己吃到普通甜椒，可以继续夹菜",
+        "① 记住本轮辣椒与甜椒的总数\n② 服务员每次只端上一盆\n③ 决定自己吃，还是请领导吃",
         {
           fontFamily: "monospace",
           fontSize: "16px",
@@ -470,6 +473,7 @@ export class BanquetScene extends Phaser.Scene {
     this.playerHealth = MAX_HEALTH;
     this.dealerHealth = MAX_HEALTH;
     this.selectedFoodId = null;
+    this.servedFoodId = null;
     this.playerItems = [];
     this.dealerItems = [];
     this.itemsUsedThisAction = 0;
@@ -485,6 +489,7 @@ export class BanquetScene extends Phaser.Scene {
     this.phase = "round-preview";
     this.round += 1;
     this.selectedFoodId = null;
+    this.servedFoodId = null;
     this.activeItem = null;
     this.itemTargetIds = [];
     this.itemsUsedThisAction = 0;
@@ -513,7 +518,8 @@ export class BanquetScene extends Phaser.Scene {
     this.time.delayedCall(1900, () => {
       const shuffled = createRoundFoodFlags(this.round);
       this.foods = shuffled.map((spicy, id) => ({ id, spicy, revealed: false, consumed: false }));
-      this.beginPlayerTurn(false, "餐盖已经打乱。选一份吧。");
+      this.serveNextFood();
+      this.beginPlayerTurn(false, "服务员端上第 1 盆。餐盖扣得很严，决定谁先吃。");
       this.tone(90, 0.18, "square");
     });
   }
@@ -521,8 +527,15 @@ export class BanquetScene extends Phaser.Scene {
   private renderFoods() {
     this.clearFoods();
 
-    this.foods.forEach((food, index) => {
-      const position = DISH_POSITIONS[index];
+    const servedFood = this.foods.find((food) => food.id === this.servedFoodId);
+    const displayedFoods =
+      this.phase === "round-preview"
+        ? this.foods.map((food, index) => ({ food, position: DISH_POSITIONS[index] }))
+        : servedFood
+          ? [{ food: servedFood, position: SERVING_POSITION }]
+          : [];
+
+    displayedFoods.forEach(({ food, position }) => {
       const container = this.add
         .container(position.x, position.y)
         .setDepth(20 + Math.round(position.y / 20))
@@ -571,12 +584,7 @@ export class BanquetScene extends Phaser.Scene {
         container.addAt(ring, 0);
       }
 
-      if (
-        !food.consumed &&
-        (this.phase === "player-pick" ||
-          this.phase === "player-target" ||
-          this.phase === "player-item-target")
-      ) {
+      if (!food.consumed && this.phase === "player-item-target") {
         container.setSize(132, 90);
         container.setInteractive(new Phaser.Geom.Rectangle(-66, -47, 132, 94), Phaser.Geom.Rectangle.Contains);
         container.on("pointerover", () => {
@@ -625,18 +633,8 @@ export class BanquetScene extends Phaser.Scene {
   private selectFood(id: number) {
     const food = this.foods.find((candidate) => candidate.id === id);
     if (!food || food.consumed) return;
-    if (this.phase === "player-item-target") {
-      this.selectItemFoodTarget(id);
-      return;
-    }
-    if (this.phase !== "player-pick" && this.phase !== "player-target") return;
-    this.tone(310, 0.045, "triangle");
-    this.selectedFoodId = id;
-    this.phase = "player-target";
-    this.renderFoods();
-    this.renderItemSlots();
-    this.targetPanel.setVisible(true);
-    this.setMessage("很好。现在决定谁来吃。");
+    if (this.phase !== "player-item-target") return;
+    this.selectItemFoodTarget(id);
   }
 
   private registerItemEffects() {
@@ -652,8 +650,8 @@ export class BanquetScene extends Phaser.Scene {
       this.renderFoods();
       this.setMessage(
         food.spicy
-          ? "牙签挑开一条缝：里面是超级无敌辣椒。记住这个位置。"
-          : "牙签挑开一条缝：里面是普通甜椒。记住这个位置。",
+          ? "牙签挑开一条缝：眼前这盆是超级无敌辣椒。"
+          : "牙签挑开一条缝：眼前这盆是普通甜椒。",
       );
       this.tone(food.spicy ? 118 : 410, 0.12, food.spicy ? "sawtooth" : "sine");
 
@@ -662,18 +660,42 @@ export class BanquetScene extends Phaser.Scene {
         this.consumePlayerItem(item);
         this.resumePlayerChoice(
           canUseAnotherItem(this.itemsUsedThisAction)
-            ? "餐盖重新盖好了。你还可以使用道具，或直接选择一份食物。"
-            : "餐盖重新盖好了。本次道具额度已用完，请选择一份食物。",
+            ? "餐盖重新盖好了。你还可以使用道具，或决定谁吃眼前这盆。"
+            : "餐盖重新盖好了。本次道具额度已用完，请决定谁吃眼前这盆。",
+        );
+      });
+    });
+
+    this.itemEffectHandlers.set("swap-next-food", (item) => {
+      const swap = swapServedWithNext(this.foods, this.servedFoodId);
+      if (!swap.swapped) {
+        this.cancelActiveItem("只剩最后一盆了，公筷已经没有可以交换的对象。");
+        return;
+      }
+
+      this.foods = swap.entries;
+      this.servedFoodId = swap.servedId;
+      this.selectedFoodId = this.servedFoodId;
+      this.renderFoods();
+      this.setMessage("领导看着你用公筷，把眼前这盆和下一盆公开调换了位置……");
+      this.tone(225, 0.08, "square");
+
+      this.time.delayedCall(650, () => {
+        this.consumePlayerItem(item);
+        this.resumePlayerChoice(
+          canUseAnotherItem(this.itemsUsedThisAction)
+            ? "交换完成。你还可以使用道具，或决定谁吃换上来的这一盆。"
+            : "交换完成。本次道具额度已用完，请决定谁吃换上来的这一盆。",
         );
       });
     });
   }
 
   private activatePlayerItem(instanceId: string) {
-    if (this.phase !== "player-pick" && this.phase !== "player-item-target") return;
+    if (this.phase !== "player-target" && this.phase !== "player-item-target") return;
 
     if (this.activeItem?.instanceId === instanceId) {
-      this.cancelActiveItem("已收起道具。你可以换一件，或直接选择食物。");
+      this.cancelActiveItem("已收起道具。你可以换一件，或直接决定谁吃眼前这盆。");
       return;
     }
     if (!canUseAnotherItem(this.itemsUsedThisAction)) {
@@ -691,7 +713,7 @@ export class BanquetScene extends Phaser.Scene {
 
     this.activeItem = item;
     this.itemTargetIds = [];
-    this.selectedFoodId = null;
+    this.selectedFoodId = this.servedFoodId;
     this.targetPanel.setVisible(false);
     this.tone(275, 0.05, "triangle");
 
@@ -753,20 +775,30 @@ export class BanquetScene extends Phaser.Scene {
   }
 
   private resumePlayerChoice(message: string) {
-    this.phase = "player-pick";
+    this.phase = "player-target";
     this.activeItem = null;
     this.itemTargetIds = [];
-    this.selectedFoodId = null;
-    this.targetPanel.setVisible(false);
+    this.selectedFoodId = this.servedFoodId;
+    this.targetPanel.setVisible(true);
     this.renderFoods();
     this.renderItemSlots();
-    this.turnText.setText("轮到你夹菜");
+    this.turnText.setText("轮到你决定");
     this.setMessage(message);
   }
 
+  private serveNextFood() {
+    this.servedFoodId = nextServingId(this.foods);
+    this.selectedFoodId = this.servedFoodId;
+  }
+
+  private servingLabel() {
+    const servingNumber = this.foods.filter((food) => food.consumed).length + 1;
+    return `第 ${servingNumber} / ${this.foods.length} 盆`;
+  }
+
   private resolvePlayerChoice(target: Target) {
-    if (this.phase !== "player-target" || this.selectedFoodId === null) return;
-    this.resolveChoice("player", target, this.selectedFoodId);
+    if (this.phase !== "player-target" || this.servedFoodId === null) return;
+    this.resolveChoice("player", target, this.servedFoodId);
   }
 
   private resolveChoice(actor: Actor, target: Target, foodId: number) {
@@ -809,6 +841,7 @@ export class BanquetScene extends Phaser.Scene {
 
       this.time.delayedCall(900, () => {
         food.consumed = true;
+        this.servedFoodId = null;
         this.selectedFoodId = null;
         this.renderFoods();
         this.updateHud();
@@ -822,51 +855,68 @@ export class BanquetScene extends Phaser.Scene {
           return;
         }
         if (this.foods.every((candidate) => candidate.consumed)) {
-          this.setMessage("本轮餐盘已空。服务员正在端来更危险的一盘。 ");
+          this.setMessage("本轮六盆已经全部端完。服务员正在准备更危险的下一轮。 ");
           this.turnText.setText("正在换盘");
           this.time.delayedCall(1050, () => this.prepareRound());
           return;
         }
 
-        if (resolution.nextActor === "player") {
-          this.beginPlayerTurn(resolution.extraTurn);
-        } else {
-          this.beginAiTurn(resolution.extraTurn);
-        }
+        this.phase = "resolving";
+        this.turnText.setText("服务员正在上菜");
+        this.setMessage("空盆被端走。服务员从固定队列中端来下一盆……");
+        this.renderItemSlots();
+        this.time.delayedCall(650, () => {
+          this.serveNextFood();
+          if (resolution.nextActor === "player") {
+            this.beginPlayerTurn(resolution.extraTurn);
+          } else {
+            this.beginAiTurn(resolution.extraTurn);
+          }
+        });
       });
     });
   }
 
   private beginPlayerTurn(continuing: boolean, message?: string) {
-    this.phase = "player-pick";
-    this.selectedFoodId = null;
+    this.phase = "player-target";
+    this.selectedFoodId = this.servedFoodId;
     this.activeItem = null;
     this.itemTargetIds = [];
     this.itemsUsedThisAction = 0;
-    this.targetPanel.setVisible(false);
+    this.targetPanel.setVisible(true);
     this.renderFoods();
     this.renderItemSlots();
-    this.turnText.setText(continuing ? "你可以继续夹菜" : "轮到你夹菜");
-    this.setMessage(message ?? (continuing ? "安全。按照桌上的规矩，你可以继续。" : "领导把公筷递给了你。"));
+    this.turnText.setText(continuing ? "你继续决定" : "轮到你决定");
+    this.setMessage(
+      message ??
+        (continuing
+          ? `安全。服务员端上${this.servingLabel()}，你可以继续决定谁吃。`
+          : `服务员端上${this.servingLabel()}。决定自己吃，还是请领导吃。`),
+    );
   }
 
   private beginAiTurn(continuing: boolean) {
     this.phase = "ai-turn";
-    this.selectedFoodId = null;
+    this.selectedFoodId = this.servedFoodId;
     this.activeItem = null;
     this.itemTargetIds = [];
     this.targetPanel.setVisible(false);
     this.renderFoods();
     this.renderItemSlots();
-    this.turnText.setText(continuing ? "领导继续夹菜" : "轮到领导夹菜");
-    this.setMessage(continuing ? "领导的运气不错。他决定再试一次。" : "领导正在进行风险评估……");
+    this.turnText.setText(continuing ? "领导继续决定" : "轮到领导决定");
+    this.setMessage(
+      continuing
+        ? `服务员端上${this.servingLabel()}。领导决定再试一次。`
+        : `服务员端上${this.servingLabel()}。领导正在进行风险评估……`,
+    );
 
     this.time.delayedCall(800, () => {
       if (this.phase !== "ai-turn") return;
       const remaining = this.foods.filter((food) => !food.consumed);
       const spicyLeft = remaining.filter((food) => food.spicy).length;
       const safeProbability = remaining.length === 0 ? 0 : (remaining.length - spicyLeft) / remaining.length;
-      const selected = Phaser.Utils.Array.GetRandom(remaining);
+      const selected = remaining.find((food) => food.id === this.servedFoodId);
+      if (!selected) return;
       const confidenceWobble = Phaser.Math.FloatBetween(-0.08, 0.08);
       const target: Target = safeProbability + confidenceWobble >= 0.58 ? "dealer" : "player";
 

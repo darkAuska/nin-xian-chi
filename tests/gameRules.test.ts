@@ -3,8 +3,10 @@ import test from "node:test";
 import {
   createRoundFoodFlags,
   FOOD_COUNT,
+  nextServingId,
   resolveTurn,
   spicyCountForRound,
+  swapServedWithNext,
 } from "../src/gameRules.ts";
 
 test("safe food eaten by the acting side grants an extra turn", () => {
@@ -56,4 +58,38 @@ test("round creation preserves food and spicy counts after shuffling", () => {
     assert.equal(foods.length, FOOD_COUNT);
     assert.equal(foods.filter(Boolean).length, spicyCountForRound(round));
   }
+});
+
+test("the waiter always serves the first unconsumed entry in queue order", () => {
+  const queue = [
+    { id: 0, consumed: true },
+    { id: 1, consumed: false },
+    { id: 2, consumed: false },
+  ];
+  assert.equal(nextServingId(queue), 1);
+});
+
+test("chopsticks swap only the served entry and the next queue entry", () => {
+  const queue = [
+    { id: 0, consumed: true },
+    { id: 1, consumed: false },
+    { id: 2, consumed: false },
+    { id: 3, consumed: false },
+  ];
+  const result = swapServedWithNext(queue, 1);
+  assert.equal(result.swapped, true);
+  assert.equal(result.servedId, 2);
+  assert.deepEqual(result.entries.map((entry) => entry.id), [0, 2, 1, 3]);
+  assert.deepEqual(queue.map((entry) => entry.id), [0, 1, 2, 3]);
+});
+
+test("chopsticks do nothing when only the final serving remains", () => {
+  const queue = [
+    { id: 0, consumed: true },
+    { id: 1, consumed: false },
+  ];
+  const result = swapServedWithNext(queue, 1);
+  assert.equal(result.swapped, false);
+  assert.equal(result.servedId, 1);
+  assert.deepEqual(result.entries, queue);
 });
