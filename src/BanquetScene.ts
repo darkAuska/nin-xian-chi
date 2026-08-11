@@ -7,12 +7,22 @@ import {
   type Actor,
   type Target,
 } from "./gameRules";
+import {
+  canUseAnotherItem,
+  getItemDefinition,
+  grantRandomItems,
+  MAX_ITEM_SLOTS,
+  MAX_ITEMS_PER_ACTION,
+  removeItemInstance,
+  type ItemInstance,
+} from "./items";
 
 type Phase =
   | "intro"
   | "round-preview"
   | "player-pick"
   | "player-target"
+  | "player-item-target"
   | "resolving"
   | "ai-turn"
   | "won"
@@ -44,6 +54,15 @@ export class BanquetScene extends Phaser.Scene {
   private dealerHealth = MAX_HEALTH;
   private round = 0;
   private selectedFoodId: number | null = null;
+  private playerItems: ItemInstance[] = [];
+  private dealerItems: ItemInstance[] = [];
+  private itemsUsedThisAction = 0;
+  private activeItem: ItemInstance | null = null;
+  private itemTargetIds: number[] = [];
+  private readonly itemEffectHandlers = new Map<
+    string,
+    (item: ItemInstance, foodIds: number[]) => void
+  >();
   private statusText!: Phaser.GameObjects.Text;
   private roundText!: Phaser.GameObjects.Text;
   private remainingText!: Phaser.GameObjects.Text;
@@ -51,6 +70,8 @@ export class BanquetScene extends Phaser.Scene {
   private dealerCaption!: Phaser.GameObjects.Text;
   private playerMilk!: Phaser.GameObjects.Container;
   private dealerMilk!: Phaser.GameObjects.Container;
+  private playerItemRoot!: Phaser.GameObjects.Container;
+  private dealerItemRoot!: Phaser.GameObjects.Container;
   private targetPanel!: Phaser.GameObjects.Container;
   private introOverlay?: Phaser.GameObjects.Container;
   private resultOverlay?: Phaser.GameObjects.Container;
@@ -64,6 +85,7 @@ export class BanquetScene extends Phaser.Scene {
 
   create() {
     this.cameras.main.setBackgroundColor("#160907");
+    this.registerItemEffects();
     this.drawRoom();
     this.createHud();
     this.createTargetPanel();
@@ -215,7 +237,10 @@ export class BanquetScene extends Phaser.Scene {
 
     this.dealerMilk = this.add.container(1055, 126).setDepth(31);
     this.playerMilk = this.add.container(190, 625).setDepth(31);
+    this.dealerItemRoot = this.add.container(1150, 230).setDepth(52);
+    this.playerItemRoot = this.add.container(WIDTH / 2, 695).setDepth(70);
     this.drawMilkRows();
+    this.renderItemSlots();
   }
 
   private drawMilkRows() {
@@ -249,6 +274,87 @@ export class BanquetScene extends Phaser.Scene {
         glass.lineBetween(index * 48 + 5, 5, index * 48 + 29, 36);
       }
       root.add(glass);
+    }
+  }
+
+  private renderItemSlots() {
+    this.drawItemSlots(this.dealerItemRoot, this.dealerItems, false);
+    this.drawItemSlots(this.playerItemRoot, this.playerItems, true);
+  }
+
+  private drawItemSlots(
+    root: Phaser.GameObjects.Container,
+    items: ItemInstance[],
+    player: boolean,
+  ) {
+    root.removeAll(true);
+    const canInteract =
+      player &&
+      (this.phase === "player-pick" || this.phase === "player-item-target") &&
+      canUseAnotherItem(this.itemsUsedThisAction);
+    const label = this.add
+      .text(
+        player ? 0 : -4,
+        player ? -31 : -27,
+        player
+          ? `你的道具 · 本次还可用 ${Math.max(0, MAX_ITEMS_PER_ACTION - this.itemsUsedThisAction)} 件`
+          : "领导的道具",
+        {
+          fontFamily: "monospace",
+          fontSize: "10px",
+          color: "#caa57b",
+        },
+      )
+      .setOrigin(player ? 0.5 : 1, 0.5);
+    root.add(label);
+
+    for (let index = 0; index < MAX_ITEM_SLOTS; index += 1) {
+      const item = items[index];
+      const x = player ? (index - 1.5) * 104 : 0;
+      const y = player ? 0 : index * 53;
+      const slot = this.add.container(x, y);
+      const active = item?.instanceId === this.activeItem?.instanceId;
+      const background = this.add
+        .rectangle(0, 0, player ? 94 : 88, 43, item ? 0x2b130d : 0x120705, item ? 0.96 : 0.55)
+        .setStrokeStyle(active ? 3 : 2, active ? 0xffd36f : 0x8d563d, item ? 0.8 : 0.25);
+      slot.add(background);
+
+      if (item) {
+        const definition = getItemDefinition(item.definitionId);
+        const icon = this.add
+          .text(player ? -29 : -26, 0, definition.shortLabel, {
+            fontFamily: "serif",
+            fontSize: "21px",
+            color: `#${definition.tint.toString(16).padStart(6, "0")}`,
+          })
+          .setOrigin(0.5);
+        const name = this.add
+          .text(player ? 12 : 10, 0, definition.name, {
+            fontFamily: "monospace",
+            fontSize: "11px",
+            color: canInteract ? "#f3d9b2" : "#806459",
+          })
+          .setOrigin(0.5);
+        slot.add([icon, name]);
+
+        if (canInteract) {
+          background.setInteractive({ useHandCursor: true });
+          background.on("pointerover", () => slot.setScale(1.05));
+          background.on("pointerout", () => slot.setScale(1));
+          background.on("pointerdown", () => this.activatePlayerItem(item.instanceId));
+        }
+      } else {
+        const empty = this.add
+          .text(0, 0, "空", {
+            fontFamily: "monospace",
+            fontSize: "9px",
+            color: "#4f332c",
+          })
+          .setOrigin(0.5);
+        slot.add(empty);
+      }
+
+      root.add(slot);
     }
   }
 
@@ -364,8 +470,14 @@ export class BanquetScene extends Phaser.Scene {
     this.playerHealth = MAX_HEALTH;
     this.dealerHealth = MAX_HEALTH;
     this.selectedFoodId = null;
+    this.playerItems = [];
+    this.dealerItems = [];
+    this.itemsUsedThisAction = 0;
+    this.activeItem = null;
+    this.itemTargetIds = [];
     this.clearFoods();
     this.drawMilkRows();
+    this.renderItemSlots();
     this.prepareRound();
   }
 
@@ -373,7 +485,13 @@ export class BanquetScene extends Phaser.Scene {
     this.phase = "round-preview";
     this.round += 1;
     this.selectedFoodId = null;
+    this.activeItem = null;
+    this.itemTargetIds = [];
+    this.itemsUsedThisAction = 0;
+    this.playerItems = grantRandomItems(this.round, "player");
+    this.dealerItems = grantRandomItems(this.round, "dealer");
     this.targetPanel.setVisible(false);
+    this.renderItemSlots();
 
     const spicyCount = spicyCountForRound(this.round);
     const safeCount = 6 - spicyCount;
@@ -386,7 +504,9 @@ export class BanquetScene extends Phaser.Scene {
     this.renderFoods();
     this.roundText.setText(`第 ${this.round} 轮`);
     this.turnText.setText("请记住数量");
-    this.setMessage(`本轮有 ${spicyCount} 颗超级无敌辣椒，${safeCount} 颗普通甜椒。`);
+    this.setMessage(
+      `本轮有 ${spicyCount} 颗超级无敌辣椒，${safeCount} 颗普通甜椒。服务员送来 ${this.playerItems.length} 件道具。`,
+    );
     this.updateHud();
     this.tone(240, 0.08, "triangle");
 
@@ -446,12 +566,17 @@ export class BanquetScene extends Phaser.Scene {
         container.add(graphics);
       }
 
-      if (this.selectedFoodId === food.id && !food.consumed) {
+      if ((this.selectedFoodId === food.id || this.itemTargetIds.includes(food.id)) && !food.consumed) {
         const ring = this.add.ellipse(0, 7, 142, 76).setStrokeStyle(4, 0xffd36f, 0.95);
         container.addAt(ring, 0);
       }
 
-      if (!food.consumed && (this.phase === "player-pick" || this.phase === "player-target")) {
+      if (
+        !food.consumed &&
+        (this.phase === "player-pick" ||
+          this.phase === "player-target" ||
+          this.phase === "player-item-target")
+      ) {
         container.setSize(132, 90);
         container.setInteractive(new Phaser.Geom.Rectangle(-66, -47, 132, 94), Phaser.Geom.Rectangle.Contains);
         container.on("pointerover", () => {
@@ -498,15 +623,145 @@ export class BanquetScene extends Phaser.Scene {
   }
 
   private selectFood(id: number) {
-    if (this.phase !== "player-pick" && this.phase !== "player-target") return;
     const food = this.foods.find((candidate) => candidate.id === id);
     if (!food || food.consumed) return;
+    if (this.phase === "player-item-target") {
+      this.selectItemFoodTarget(id);
+      return;
+    }
+    if (this.phase !== "player-pick" && this.phase !== "player-target") return;
     this.tone(310, 0.045, "triangle");
     this.selectedFoodId = id;
     this.phase = "player-target";
     this.renderFoods();
+    this.renderItemSlots();
     this.targetPanel.setVisible(true);
     this.setMessage("很好。现在决定谁来吃。");
+  }
+
+  private registerItemEffects() {
+    this.itemEffectHandlers.set("peek-food", (item, foodIds) => {
+      const food = this.foods.find((candidate) => candidate.id === foodIds[0]);
+      if (!food || food.consumed) {
+        this.cancelActiveItem("这个餐盖已经不能查看了，请重新选择。");
+        return;
+      }
+
+      const wasRevealed = food.revealed;
+      food.revealed = true;
+      this.renderFoods();
+      this.setMessage(
+        food.spicy
+          ? "牙签挑开一条缝：里面是超级无敌辣椒。记住这个位置。"
+          : "牙签挑开一条缝：里面是普通甜椒。记住这个位置。",
+      );
+      this.tone(food.spicy ? 118 : 410, 0.12, food.spicy ? "sawtooth" : "sine");
+
+      this.time.delayedCall(1150, () => {
+        food.revealed = wasRevealed;
+        this.consumePlayerItem(item);
+        this.resumePlayerChoice(
+          canUseAnotherItem(this.itemsUsedThisAction)
+            ? "餐盖重新盖好了。你还可以使用道具，或直接选择一份食物。"
+            : "餐盖重新盖好了。本次道具额度已用完，请选择一份食物。",
+        );
+      });
+    });
+  }
+
+  private activatePlayerItem(instanceId: string) {
+    if (this.phase !== "player-pick" && this.phase !== "player-item-target") return;
+
+    if (this.activeItem?.instanceId === instanceId) {
+      this.cancelActiveItem("已收起道具。你可以换一件，或直接选择食物。");
+      return;
+    }
+    if (!canUseAnotherItem(this.itemsUsedThisAction)) {
+      this.cancelActiveItem("本次最多使用两件道具，请选择一份食物。");
+      return;
+    }
+
+    const item = this.playerItems.find((candidate) => candidate.instanceId === instanceId);
+    if (!item) return;
+    const definition = getItemDefinition(item.definitionId);
+    if (!this.itemEffectHandlers.has(definition.effectId)) {
+      this.cancelActiveItem(`${definition.name}暂时没有可用效果。`);
+      return;
+    }
+
+    this.activeItem = item;
+    this.itemTargetIds = [];
+    this.selectedFoodId = null;
+    this.targetPanel.setVisible(false);
+    this.tone(275, 0.05, "triangle");
+
+    if (definition.foodTargetCount === 0) {
+      this.phase = "resolving";
+      this.renderFoods();
+      this.renderItemSlots();
+      this.itemEffectHandlers.get(definition.effectId)?.(item, []);
+      return;
+    }
+
+    this.phase = "player-item-target";
+    this.renderFoods();
+    this.renderItemSlots();
+    this.setMessage(definition.targetPrompt);
+  }
+
+  private selectItemFoodTarget(id: number) {
+    if (this.phase !== "player-item-target" || !this.activeItem) return;
+    const food = this.foods.find((candidate) => candidate.id === id);
+    if (!food || food.consumed) return;
+
+    const definition = getItemDefinition(this.activeItem.definitionId);
+    if (this.itemTargetIds.includes(id)) {
+      this.itemTargetIds = this.itemTargetIds.filter((targetId) => targetId !== id);
+    } else if (this.itemTargetIds.length < definition.foodTargetCount) {
+      this.itemTargetIds.push(id);
+    }
+    this.tone(340, 0.045, "triangle");
+    this.renderFoods();
+
+    if (this.itemTargetIds.length < definition.foodTargetCount) {
+      const remaining = definition.foodTargetCount - this.itemTargetIds.length;
+      this.setMessage(`${definition.targetPrompt} 还需选择 ${remaining} 个餐盖。`);
+      return;
+    }
+
+    const handler = this.itemEffectHandlers.get(definition.effectId);
+    if (!handler) {
+      this.cancelActiveItem(`${definition.name}暂时没有可用效果。`);
+      return;
+    }
+    const targets = [...this.itemTargetIds];
+    this.phase = "resolving";
+    this.renderFoods();
+    this.renderItemSlots();
+    handler(this.activeItem, targets);
+  }
+
+  private consumePlayerItem(item: ItemInstance) {
+    this.playerItems = removeItemInstance(this.playerItems, item.instanceId);
+    this.itemsUsedThisAction += 1;
+    this.activeItem = null;
+    this.itemTargetIds = [];
+  }
+
+  private cancelActiveItem(message: string) {
+    this.resumePlayerChoice(message);
+  }
+
+  private resumePlayerChoice(message: string) {
+    this.phase = "player-pick";
+    this.activeItem = null;
+    this.itemTargetIds = [];
+    this.selectedFoodId = null;
+    this.targetPanel.setVisible(false);
+    this.renderFoods();
+    this.renderItemSlots();
+    this.turnText.setText("轮到你夹菜");
+    this.setMessage(message);
   }
 
   private resolvePlayerChoice(target: Target) {
@@ -524,6 +779,7 @@ export class BanquetScene extends Phaser.Scene {
     this.selectedFoodId = foodId;
     food.revealed = true;
     this.renderFoods();
+    this.renderItemSlots();
 
     const actorName = actor === "player" ? "你" : "领导";
     const targetName = target === actor ? "自己" : target === "player" ? "你" : "领导";
@@ -584,8 +840,12 @@ export class BanquetScene extends Phaser.Scene {
   private beginPlayerTurn(continuing: boolean, message?: string) {
     this.phase = "player-pick";
     this.selectedFoodId = null;
+    this.activeItem = null;
+    this.itemTargetIds = [];
+    this.itemsUsedThisAction = 0;
     this.targetPanel.setVisible(false);
     this.renderFoods();
+    this.renderItemSlots();
     this.turnText.setText(continuing ? "你可以继续夹菜" : "轮到你夹菜");
     this.setMessage(message ?? (continuing ? "安全。按照桌上的规矩，你可以继续。" : "领导把公筷递给了你。"));
   }
@@ -593,8 +853,11 @@ export class BanquetScene extends Phaser.Scene {
   private beginAiTurn(continuing: boolean) {
     this.phase = "ai-turn";
     this.selectedFoodId = null;
+    this.activeItem = null;
+    this.itemTargetIds = [];
     this.targetPanel.setVisible(false);
     this.renderFoods();
+    this.renderItemSlots();
     this.turnText.setText(continuing ? "领导继续夹菜" : "轮到领导夹菜");
     this.setMessage(continuing ? "领导的运气不错。他决定再试一次。" : "领导正在进行风险评估……");
 

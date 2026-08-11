@@ -15,8 +15,9 @@ npm run dev
 
 1. 记住本轮普通甜椒和超级无敌辣椒的数量。
 2. 洗牌后选择一个餐盖。
-3. 决定“我先吃”或“您先吃”。
-4. 自己吃到普通甜椒可继续行动。
-5. 吃到超级无敌辣椒失去一杯牛奶，三杯耗尽即失败。
+3. 夹菜前可以使用道具；当前“牙签”可私下查看一个餐盖。
+4. 决定“我先吃”或“您先吃”。
+5. 自己吃到普通甜椒可继续行动。
+6. 吃到超级无敌辣椒失去一杯牛奶，三杯耗尽即失败。
 
-完整设计见 [GAME_DESIGN.md](./GAME_DESIGN.md)，分阶段开发路线见 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)。
+完整设计见 [GAME_DESIGN.md](./GAME_DESIGN.md)，分阶段开发路线见 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)，新增道具的方法见 [ITEM_SYSTEM.md](./ITEM_SYSTEM.md)。
