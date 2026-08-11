@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createRoundFoodFlags,
+  discardServedEntry,
   FOOD_COUNT,
   nextServingId,
   resolveTurn,
@@ -92,4 +93,23 @@ test("chopsticks do nothing when only the final serving remains", () => {
   assert.equal(result.swapped, false);
   assert.equal(result.servedId, 1);
   assert.deepEqual(result.entries, queue);
+});
+
+test("a takeout box discards only the served entry without mutating the queue", () => {
+  const queue = [
+    { id: 0, consumed: true },
+    { id: 1, consumed: false },
+    { id: 2, consumed: false },
+  ];
+  const result = discardServedEntry(queue, 1);
+  assert.equal(result.discarded, true);
+  assert.equal(result.discardedId, 1);
+  assert.deepEqual(result.entries.map((entry) => entry.consumed), [true, true, false]);
+  assert.deepEqual(queue.map((entry) => entry.consumed), [true, false, false]);
+});
+
+test("a takeout box cannot discard a missing or already consumed serving", () => {
+  const queue = [{ id: 0, consumed: true }];
+  assert.equal(discardServedEntry(queue, 0).discarded, false);
+  assert.equal(discardServedEntry(queue, null).discarded, false);
 });

@@ -1,6 +1,7 @@
 import * as Phaser from "phaser";
 import {
   createRoundFoodFlags,
+  discardServedEntry,
   MAX_HEALTH,
   nextServingId,
   resolveTurn,
@@ -689,6 +690,53 @@ export class BanquetScene extends Phaser.Scene {
         );
       });
     });
+
+    this.itemEffectHandlers.set("discard-current-food", (item) => {
+      const food = this.foods.find(
+        (candidate) => candidate.id === this.servedFoodId && !candidate.consumed,
+      );
+      if (!food) {
+        this.cancelActiveItem("眼前没有可以打包的食物。");
+        return;
+      }
+
+      food.revealed = true;
+      this.renderFoods();
+      this.setMessage(
+        food.spicy
+          ? "打包盒掀开餐盖：超级无敌辣椒被装走了，没有人受伤。"
+          : "打包盒掀开餐盖：普通甜椒被装走了，没有人获得额外行动。",
+      );
+      this.tone(food.spicy ? 145 : 360, 0.1, "triangle");
+
+      this.time.delayedCall(850, () => {
+        const discard = discardServedEntry(this.foods, this.servedFoodId);
+        if (!discard.discarded) {
+          this.cancelActiveItem("这盆食物已经不能打包了。");
+          return;
+        }
+
+        this.foods = discard.entries;
+        this.consumePlayerItem(item);
+        this.servedFoodId = null;
+        this.selectedFoodId = null;
+        this.renderFoods();
+        this.renderItemSlots();
+        this.updateHud();
+
+        if (this.finishRoundIfEmpty()) return;
+
+        this.setMessage("打包盒被服务员封好带走。现在从固定队列端来下一盆……");
+        this.time.delayedCall(650, () => {
+          this.serveNextFood();
+          this.resumePlayerChoice(
+            canUseAnotherItem(this.itemsUsedThisAction)
+              ? `${this.servingLabel()}已经上桌。你还可以使用道具，或决定谁吃。`
+              : `${this.servingLabel()}已经上桌。本次道具额度已用完，请决定谁吃。`,
+          );
+        });
+      });
+    });
   }
 
   private activatePlayerItem(instanceId: string) {
@@ -796,6 +844,17 @@ export class BanquetScene extends Phaser.Scene {
     return `第 ${servingNumber} / ${this.foods.length} 盆`;
   }
 
+  private finishRoundIfEmpty() {
+    if (!this.foods.every((food) => food.consumed)) return false;
+    this.phase = "resolving";
+    this.targetPanel.setVisible(false);
+    this.setMessage("本轮六盆已经全部端完。服务员正在准备更危险的下一轮。 ");
+    this.turnText.setText("正在换盘");
+    this.renderItemSlots();
+    this.time.delayedCall(1050, () => this.prepareRound());
+    return true;
+  }
+
   private resolvePlayerChoice(target: Target) {
     if (this.phase !== "player-target" || this.servedFoodId === null) return;
     this.resolveChoice("player", target, this.servedFoodId);
@@ -854,12 +913,7 @@ export class BanquetScene extends Phaser.Scene {
           this.finishGame("won");
           return;
         }
-        if (this.foods.every((candidate) => candidate.consumed)) {
-          this.setMessage("本轮六盆已经全部端完。服务员正在准备更危险的下一轮。 ");
-          this.turnText.setText("正在换盘");
-          this.time.delayedCall(1050, () => this.prepareRound());
-          return;
-        }
+        if (this.finishRoundIfEmpty()) return;
 
         this.phase = "resolving";
         this.turnText.setText("服务员正在上菜");

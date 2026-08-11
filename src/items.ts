@@ -90,3 +90,14 @@ registerItemDefinition({
   targetPrompt: "",
   tint: 0xc98b52,
 });
+
+registerItemDefinition({
+  id: "takeout-box",
+  name: "打包盒",
+  shortLabel: "盒",
+  description: "公开打包眼前这一盆，不触发食物效果，然后继续上菜。",
+  effectId: "discard-current-food",
+  foodTargetCount: 0,
+  targetPrompt: "",
+  tint: 0xb7c6a1,
+});

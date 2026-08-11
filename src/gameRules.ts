@@ -18,6 +18,12 @@ export type QueueSwapResult<T extends ServingQueueEntry> = {
   swapped: boolean;
 };
 
+export type QueueDiscardResult<T extends ServingQueueEntry> = {
+  entries: T[];
+  discardedId: number | null;
+  discarded: boolean;
+};
+
 export const MAX_HEALTH = 3;
 export const FOOD_COUNT = 6;
 
@@ -81,5 +87,28 @@ export function swapServedWithNext<T extends ServingQueueEntry>(
     entries: nextEntries,
     servedId: nextEntries[currentIndex].id,
     swapped: true,
+  };
+}
+
+export function discardServedEntry<T extends ServingQueueEntry>(
+  entries: T[],
+  servedId: number | null,
+): QueueDiscardResult<T> {
+  const currentIndex = entries.findIndex(
+    (entry) => entry.id === servedId && !entry.consumed,
+  );
+  if (currentIndex < 0) {
+    return { entries: [...entries], discardedId: null, discarded: false };
+  }
+
+  const nextEntries = [...entries];
+  nextEntries[currentIndex] = {
+    ...nextEntries[currentIndex],
+    consumed: true,
+  };
+  return {
+    entries: nextEntries,
+    discardedId: servedId,
+    discarded: true,
   };
 }
