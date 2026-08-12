@@ -24,9 +24,13 @@ npm run dev
 
 ## 操作与表现
 
-- 鼠标与触摸均可操作；建议手机横屏游玩，竖屏会显示旋转提示。
+- 默认提供英文参赛入口，可按 `L` 或右上角按钮切换中文。
+- 鼠标、触摸与键盘均可操作；`Enter` 开始/再来一局，`1` 自己吃，`2` 请领导吃，`3–6` 使用道具，`R` 重开。
+- 每局最长三分钟，结算八秒后自动重开；建议手机横屏游玩，竖屏会显示旋转提示。
 - 每次行动可先点道具，再点“我先吃”或“您先吃”；动画播放期间会锁定重复输入。
 - 对局中可随时“立即重开”，结算后可“一键再吃一桌”。
 - 餐盖、吞咽、喷火、喝奶和道具声音在首次开始后启用；辣椒包含纸片火焰、桌面震动和逐杯牛奶反馈。
 
 完整设计见 [GAME_DESIGN.md](./GAME_DESIGN.md)，分阶段开发路线见 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)，美术方向与资产清单见 [ART_DIRECTION.md](./ART_DIRECTION.md)，新增道具的方法见 [ITEM_SYSTEM.md](./ITEM_SYSTEM.md)，AI 公平决策约定见 [AI_STRATEGY.md](./AI_STRATEGY.md)。
+
+Gamescom Creator Challenge 的提交文案与核对清单见 [CONTEST_SUBMISSION.md](./CONTEST_SUBMISSION.md)，素材来源与许可证记录见 [ASSET_LICENSES.md](./ASSET_LICENSES.md)。

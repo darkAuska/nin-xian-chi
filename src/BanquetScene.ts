@@ -1,6 +1,12 @@
 import * as Phaser from "phaser";
 import { chooseDealerAction, type FoodKnowledge } from "./aiStrategy";
 import {
+  AUTO_RESTART_SECONDS,
+  decideExhibitionResult,
+  EXHIBITION_SECONDS,
+  formatExhibitionTime,
+} from "./contestMode";
+import {
   armSpicyOil,
   BASE_SPICY_DAMAGE,
   createRoundFoodFlags,
@@ -41,6 +47,8 @@ type Food = {
   revealed: boolean;
   consumed: boolean;
 };
+
+type Language = "en" | "zh";
 
 const WIDTH = 1280;
 const HEIGHT = 720;
@@ -96,24 +104,42 @@ export class BanquetScene extends Phaser.Scene {
   private dealerSilhouette!: Phaser.GameObjects.Container;
   private playerHands!: Phaser.GameObjects.Container;
   private restartButton!: Phaser.GameObjects.Container;
+  private languageButton!: Phaser.GameObjects.Container;
+  private timerText!: Phaser.GameObjects.Text;
   private flash!: Phaser.GameObjects.Rectangle;
   private audioContext?: AudioContext;
+  private language: Language = "en";
+  private exhibitionSeconds = EXHIBITION_SECONDS;
+  private exhibitionDeadline = 0;
+  private exhibitionClock?: Phaser.Time.TimerEvent;
+  private autoRestartClock?: Phaser.Time.TimerEvent;
+  private autoStartOnCreate = false;
 
   constructor() {
     super("BanquetScene");
   }
 
+  init(data?: { autoStart?: boolean; language?: Language }) {
+    this.autoStartOnCreate = data?.autoStart ?? false;
+    if (data?.language) this.language = data.language;
+    this.introOverlay = undefined;
+    this.resultOverlay = undefined;
+    this.exhibitionClock = undefined;
+    this.autoRestartClock = undefined;
+    this.foodObjects.clear();
+  }
+
   preload() {
-    this.load.image("banquet-hall", "/assets/banquet-hall-v1.png");
-    this.load.image("leader-silhouette", "/assets/leader-v1.png");
-    this.load.image("cloche", "/assets/cloche-v1.png");
-    this.load.image("sweet-pepper", "/assets/sweet-pepper-v1.png");
-    this.load.image("super-chili", "/assets/super-chili-v1.png");
-    this.load.image("item-toothpick", "/assets/item-toothpick-v1.png");
-    this.load.image("item-chopsticks", "/assets/item-chopsticks-v1.png");
-    this.load.image("item-takeout", "/assets/item-takeout-v1.png");
-    this.load.image("item-chili-oil", "/assets/item-chili-oil-v1.png");
-    this.load.image("player-hand", "/assets/player-hand-v1.png");
+    this.load.image("banquet-hall", "/assets/banquet-hall-v2.png");
+    this.load.image("leader-silhouette", "/assets/leader-v2.png");
+    this.load.image("cloche", "/assets/cloche-v2.png");
+    this.load.image("sweet-pepper", "/assets/sweet-pepper-v2.png");
+    this.load.image("super-chili", "/assets/super-chili-v2.png");
+    this.load.image("item-toothpick", "/assets/item-toothpick-v2.png");
+    this.load.image("item-chopsticks", "/assets/item-chopsticks-v2.png");
+    this.load.image("item-takeout", "/assets/item-takeout-v2.png");
+    this.load.image("item-chili-oil", "/assets/item-chili-oil-v2.png");
+    this.load.image("player-hand", "/assets/player-hand-v2.png");
   }
 
   create() {
@@ -122,7 +148,9 @@ export class BanquetScene extends Phaser.Scene {
     this.drawRoom();
     this.createHud();
     this.createTargetPanel();
-    this.showIntro();
+    this.registerKeyboardControls();
+    if (this.autoStartOnCreate) this.startGame();
+    else this.showIntro();
   }
 
   private drawRoom() {
@@ -205,7 +233,7 @@ export class BanquetScene extends Phaser.Scene {
       .setDepth(29);
 
     this.roundText = this.add
-      .text(34, 26, "尚未入席", {
+      .text(34, 26, this.bilingual("NOT SEATED", "尚未入席"), {
         fontFamily: "monospace",
         fontSize: "15px",
         color: "#e3b76f",
@@ -213,7 +241,7 @@ export class BanquetScene extends Phaser.Scene {
       .setDepth(30);
 
     this.turnText = this.add
-      .text(WIDTH - 34, 28, "午夜宴会", {
+      .text(WIDTH - 34, 28, this.bilingual("MIDNIGHT BANQUET", "午夜宴会"), {
         fontFamily: "monospace",
         fontSize: "15px",
         color: "#e3b76f",
@@ -222,7 +250,7 @@ export class BanquetScene extends Phaser.Scene {
       .setDepth(30);
 
     this.statusText = this.add
-      .text(WIDTH / 2, 52, "请坐。", {
+      .text(WIDTH / 2, 52, this.bilingual("Take your seat.", "请坐。"), {
         fontFamily: "serif",
         fontSize: "21px",
         color: "#ffe6b7",
@@ -242,20 +270,37 @@ export class BanquetScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(30);
 
+    this.timerText = this.add
+      .text(34, 50, `SHOW FLOOR ${formatExhibitionTime(EXHIBITION_SECONDS)}`, {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#ffb25e",
+        letterSpacing: 1,
+      })
+      .setDepth(30);
+
     this.spicyOilText = this.add
-      .text(WIDTH / 2, 119, "魔鬼辣椒油待触发 · 下一颗超级辣椒造成 2 点伤害", {
+      .text(
+        WIDTH / 2,
+        119,
+        this.bilingual(
+          "DEVIL OIL ARMED · NEXT SUPER CHILI DEALS 2 DAMAGE",
+          "魔鬼辣椒油待触发 · 下一颗超级辣椒造成 2 点伤害",
+        ),
+        {
         fontFamily: "monospace",
         fontSize: "12px",
         color: "#ff7045",
         backgroundColor: "#3c0b06",
         padding: { x: 10, y: 5 },
-      })
+        },
+      )
       .setOrigin(0.5)
       .setDepth(32)
       .setVisible(false);
 
     this.dealerCaption = this.add
-      .text(WIDTH / 2, 328, "笑容过于标准的领导", {
+      .text(WIDTH / 2, 328, this.bilingual("THE BOSS WITH A FIXED SMILE", "笑容过于标准的领导"), {
         fontFamily: "monospace",
         fontSize: "11px",
         color: "#8b4c3e",
@@ -268,9 +313,14 @@ export class BanquetScene extends Phaser.Scene {
     this.playerMilk = this.add.container(190, 625).setDepth(31);
     this.dealerItemRoot = this.add.container(1150, 230).setDepth(52);
     this.playerItemRoot = this.add.container(WIDTH / 2, 695).setDepth(70);
-    this.restartButton = this.makeCompactButton(1191, 91, 142, 36, "立即重开", () => this.startGame())
+    this.restartButton = this.makeCompactButton(1191, 91, 142, 36, "[R] RESTART", () =>
+      this.restartScene(),
+    )
       .setDepth(61)
       .setVisible(false);
+    this.languageButton = this.makeCompactButton(1185, 137, 154, 34, "[L] 中文 / EN", () =>
+      this.toggleLanguage(),
+    ).setDepth(121);
     this.drawMilkRows();
     this.renderItemSlots();
   }
@@ -283,11 +333,18 @@ export class BanquetScene extends Phaser.Scene {
   private drawMilkRow(root: Phaser.GameObjects.Container, health: number, player: boolean) {
     root.removeAll(true);
     const label = this.add
-      .text(50, player ? 28 : -25, player ? "你的表情管理" : "领导的表情管理", {
+      .text(
+        50,
+        player ? 28 : -25,
+        player
+          ? this.bilingual("YOUR COMPOSURE", "你的表情管理")
+          : this.bilingual("BOSS COMPOSURE", "领导的表情管理"),
+        {
         fontFamily: "monospace",
         fontSize: "10px",
         color: "#caa57b",
-      })
+        },
+      )
       .setOrigin(0.5);
     root.add(label);
 
@@ -334,8 +391,14 @@ export class BanquetScene extends Phaser.Scene {
         player ? 0 : -4,
         player ? -31 : -27,
         player
-          ? `你的道具 · 本次还可用 ${Math.max(0, MAX_ITEMS_PER_ACTION - this.itemUsesThisAction.player)} 件`
-          : `领导的道具 · 已用 ${this.itemUsesThisAction.dealer}/${MAX_ITEMS_PER_ACTION}`,
+          ? this.bilingual(
+              `YOUR ITEMS · ${Math.max(0, MAX_ITEMS_PER_ACTION - this.itemUsesThisAction.player)} LEFT · KEYS 3–6`,
+              `你的道具 · 本次还可用 ${Math.max(0, MAX_ITEMS_PER_ACTION - this.itemUsesThisAction.player)} 件 · 按键 3–6`,
+            )
+          : this.bilingual(
+              `BOSS ITEMS · ${this.itemUsesThisAction.dealer}/${MAX_ITEMS_PER_ACTION} USED`,
+              `领导的道具 · 已用 ${this.itemUsesThisAction.dealer}/${MAX_ITEMS_PER_ACTION}`,
+            ),
         {
           fontFamily: "monospace",
           fontSize: "10px",
@@ -366,18 +429,32 @@ export class BanquetScene extends Phaser.Scene {
               .setDisplaySize(34, 34)
               .setAlpha(player && !canInteract ? 0.58 : 0.92)
           : this.add
-              .text(player ? -29 : -26, 0, definition.shortLabel, {
+              .text(
+                player ? -29 : -26,
+                0,
+                this.language === "en" ? definition.englishShortLabel : definition.shortLabel,
+                {
                 fontFamily: "serif",
                 fontSize: "21px",
                 color: `#${definition.tint.toString(16).padStart(6, "0")}`,
-              })
+                },
+              )
               .setOrigin(0.5);
         const name = this.add
-          .text(player ? 12 : 10, 0, definition.name, {
+          .text(
+            player ? 12 : 10,
+            0,
+            player
+              ? `[${index + 3}] ${this.language === "en" ? definition.englishName : definition.name}`
+              : this.language === "en"
+                ? definition.englishName
+                : definition.name,
+            {
             fontFamily: "monospace",
             fontSize: "11px",
             color: canInteract ? "#f3d9b2" : "#806459",
-          })
+            },
+          )
           .setOrigin(0.5);
         slot.add([icon, name]);
 
@@ -393,7 +470,7 @@ export class BanquetScene extends Phaser.Scene {
         }
       } else {
         const empty = this.add
-          .text(0, 0, "空", {
+          .text(0, 0, this.bilingual("EMPTY", "空"), {
             fontFamily: "monospace",
             fontSize: "9px",
             color: "#4f332c",
@@ -409,16 +486,16 @@ export class BanquetScene extends Phaser.Scene {
   private createTargetPanel() {
     this.targetPanel = this.add.container(WIDTH / 2, 600).setDepth(60).setVisible(false);
     const prompt = this.add
-      .text(0, -47, "眼前这盆，谁先吃？", {
+      .text(0, -47, "WHO TAKES THE BITE? / 眼前这盆，谁先吃？", {
         fontFamily: "serif",
         fontSize: "19px",
         color: "#ffe7b8",
       })
       .setOrigin(0.5);
-    const selfButton = this.makeButton(-145, 0, 250, 62, "我先吃", 0x6e2b1c, () =>
+    const selfButton = this.makeButton(-145, 0, 250, 62, "[1] I EAT / 我先吃", 0x6e2b1c, () =>
       this.resolvePlayerChoice("player"),
     );
-    const dealerButton = this.makeButton(145, 0, 250, 62, "您先吃", 0xa52218, () =>
+    const dealerButton = this.makeButton(145, 0, 250, 62, "[2] YOU FIRST / 您先吃", 0xa52218, () =>
       this.resolvePlayerChoice("dealer"),
     );
     this.targetPanel.add([prompt, selfButton, dealerButton]);
@@ -490,21 +567,28 @@ export class BanquetScene extends Phaser.Scene {
   }
 
   private showIntro() {
+    this.introOverlay?.destroy(true);
+    this.introOverlay = undefined;
     const overlay = this.add.container(0, 0).setDepth(100);
     const shade = this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, 0x090202, 0.91);
     const panel = this.add
       .rectangle(WIDTH / 2, HEIGHT / 2, 860, 550, 0x1c0907, 0.98)
       .setStrokeStyle(3, 0x8f3422, 0.8);
     const eyebrow = this.add
-      .text(WIDTH / 2, 150, "午夜公司年会 · 新品试吃环节", {
+      .text(
+        WIDTH / 2,
+        145,
+        this.bilingual("A CORPORATE BANQUET WITH ONE BAD BITE", "午夜公司年会 · 新品试吃环节"),
+        {
         fontFamily: "monospace",
         fontSize: "13px",
         color: "#c46a42",
         letterSpacing: 4,
-      })
+        },
+      )
       .setOrigin(0.5);
     const title = this.add
-      .text(WIDTH / 2, 220, "您先吃", {
+      .text(WIDTH / 2, 215, this.bilingual("YOU FIRST", "您先吃"), {
         fontFamily: "serif",
         fontSize: "82px",
         color: "#ffe5b5",
@@ -513,17 +597,28 @@ export class BanquetScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
     const subtitle = this.add
-      .text(WIDTH / 2, 295, "普通甜椒不会伤人。超级无敌辣椒会让你失去一杯牛奶。", {
+      .text(
+        WIDTH / 2,
+        292,
+        this.bilingual(
+          "One covered dish is harmless. Another can burn through your composure.",
+          "普通甜椒不会伤人。超级无敌辣椒会让你失去一杯牛奶。",
+        ),
+        {
         fontFamily: "sans-serif",
         fontSize: "18px",
         color: "#c9a588",
-      })
+        },
+      )
       .setOrigin(0.5);
     const rules = this.add
       .text(
         WIDTH / 2,
         365,
-        "① 记住本轮辣椒与甜椒的总数\n② 每次只看眼前一盆；道具可以先用，最多两件\n③ 最后点「我先吃」或「您先吃」——甜椒续手，辣椒换人",
+        this.bilingual(
+          "① MEMORIZE how many safe and super chilies enter the queue\n② READ THE ODDS, bluff, or use up to two items\n③ CHOOSE: [1] eat it yourself or [2] tell the boss ‘You first’",
+          "① 记住本轮辣椒与甜椒的总数\n② 每次只看眼前一盆；道具可以先用，最多两件\n③ 最后点「我先吃」或「您先吃」——甜椒续手，辣椒换人",
+        ),
         {
           fontFamily: "monospace",
           fontSize: "16px",
@@ -533,14 +628,31 @@ export class BanquetScene extends Phaser.Scene {
         },
       )
       .setOrigin(0.5);
-    const start = this.makeButton(WIDTH / 2, 525, 360, 74, "开始入席", 0x8f1e15, () => this.startGame());
+    const start = this.makeButton(
+      WIDTH / 2,
+      525,
+      390,
+      74,
+      this.bilingual("[ENTER] TAKE YOUR SEAT", "[回车] 开始入席"),
+      0x8f1e15,
+      () => this.startGame(),
+    );
     const warning = this.add
-      .text(WIDTH / 2, 590, "鼠标或触摸均可操作 · 领导坚持认为自己不怕辣", {
+      .text(
+        WIDTH / 2,
+        590,
+        this.bilingual(
+          "3-MINUTE SHOW-FLOOR MATCH · MOUSE · TOUCH · KEYBOARD",
+          "三分钟展会对局 · 鼠标 · 触摸 · 键盘均可操作",
+        ),
+        {
         fontFamily: "monospace",
         fontSize: "11px",
         color: "#75443a",
-      })
+        },
+      )
       .setOrigin(0.5);
+    warning.setText(`${warning.text} · [L] 中文 / EN`);
     overlay.add([shade, panel, eyebrow, title, subtitle, rules, start, warning]);
     this.introOverlay = overlay;
   }
@@ -550,6 +662,10 @@ export class BanquetScene extends Phaser.Scene {
     this.tone(120, 0.16, "sawtooth");
     this.introOverlay?.destroy(true);
     this.resultOverlay?.destroy(true);
+    this.introOverlay = undefined;
+    this.resultOverlay = undefined;
+    this.autoRestartClock?.remove(false);
+    this.exhibitionClock?.remove(false);
     this.restartButton.setVisible(true);
     this.phase = "round-preview";
     this.round = 0;
@@ -566,8 +682,16 @@ export class BanquetScene extends Phaser.Scene {
     this.itemTargetIds = [];
     this.dealerSilhouette.setX(WIDTH / 2).setAngle(0).setAlpha(1);
     this.playerHands.setPosition(0, 0).setAngle(0).setAlpha(1);
-    this.dealerCaption.setText("笑容过于标准的领导");
+    this.updateDealerCaption();
     this.flash.setAlpha(0);
+    this.exhibitionSeconds = EXHIBITION_SECONDS;
+    this.exhibitionDeadline = Date.now() + EXHIBITION_SECONDS * 1000;
+    this.updateTimerText();
+    this.exhibitionClock = this.time.addEvent({
+      delay: 1000,
+      loop: true,
+      callback: () => this.tickExhibitionClock(),
+    });
     this.clearFoods();
     this.drawMilkRows();
     this.renderItemSlots();
@@ -600,10 +724,13 @@ export class BanquetScene extends Phaser.Scene {
 
     this.foods = preview.map((spicy, id) => ({ id, spicy, revealed: true, consumed: false }));
     this.renderFoods();
-    this.roundText.setText(`第 ${this.round} 轮`);
-    this.turnText.setText("请记住数量");
+    this.roundText.setText(this.bilingual(`ROUND ${this.round}`, `第 ${this.round} 轮`));
+    this.turnText.setText(this.bilingual("MEMORIZE THE ODDS", "请记住数量"));
     this.setMessage(
-      `本轮有 ${spicyCount} 颗超级无敌辣椒，${safeCount} 颗普通甜椒。服务员送来 ${this.playerItems.length} 件道具。`,
+      this.bilingual(
+        `${spicyCount} SUPER CHILI · ${safeCount} SAFE. Remember the mix before the covers close.`,
+        `本轮有 ${spicyCount} 颗超级无敌辣椒，${safeCount} 颗普通甜椒。服务员送来 ${this.playerItems.length} 件道具。`,
+      ),
     );
     this.updateHud();
     this.tone(240, 0.08, "triangle");
@@ -612,7 +739,13 @@ export class BanquetScene extends Phaser.Scene {
       const shuffled = createRoundFoodFlags(this.round);
       this.foods = shuffled.map((spicy, id) => ({ id, spicy, revealed: false, consumed: false }));
       this.serveNextFood();
-      this.beginPlayerTurn(false, "服务员端上第 1 盆。餐盖扣得很严，决定谁先吃。");
+      this.beginPlayerTurn(
+        false,
+        this.bilingual(
+          "FIRST BITE: press [1] to eat it, or [2] to tell the boss ‘You first’.",
+          "第一口：按 [1] 我先吃，或按 [2] 请领导先吃。",
+        ),
+      );
       this.tone(90, 0.18, "square");
     });
   }
@@ -653,11 +786,18 @@ export class BanquetScene extends Phaser.Scene {
           .image(0, food.spicy ? -7 : -4, food.spicy ? "super-chili" : "sweet-pepper")
           .setDisplaySize(food.spicy ? 102 : 88, food.spicy ? 66 : 58);
         const label = this.add
-          .text(0, 53, food.spicy ? "超级无敌辣椒" : "普通甜椒", {
-            fontFamily: "monospace",
-            fontSize: "10px",
-            color: food.spicy ? "#ff6a3d" : "#9fcf75",
-          })
+          .text(
+            0,
+            53,
+            food.spicy
+              ? this.bilingual("SUPER CHILI", "超级无敌辣椒")
+              : this.bilingual("SWEET PEPPER", "普通甜椒"),
+            {
+              fontFamily: "monospace",
+              fontSize: "10px",
+              color: food.spicy ? "#ff6a3d" : "#9fcf75",
+            },
+          )
           .setOrigin(0.5);
         container.add([graphics, pepper, label]);
         container.setData("foodVisuals", [pepper, label]);
@@ -706,7 +846,12 @@ export class BanquetScene extends Phaser.Scene {
     this.itemEffectHandlers.set("peek-food", (item, foodIds) => {
       const food = this.foods.find((candidate) => candidate.id === foodIds[0]);
       if (!food || food.consumed) {
-        this.cancelActiveItem("这个餐盖已经不能查看了，请重新选择。");
+        this.cancelActiveItem(
+          this.bilingual(
+            "That serving can no longer be inspected. Choose again.",
+            "这个餐盖已经不能查看了，请重新选择。",
+          ),
+        );
         return;
       }
 
@@ -715,9 +860,14 @@ export class BanquetScene extends Phaser.Scene {
       food.revealed = true;
       this.renderFoods();
       this.setMessage(
-        food.spicy
-          ? "牙签挑开一条缝：眼前这盆是超级无敌辣椒。"
-          : "牙签挑开一条缝：眼前这盆是普通甜椒。",
+        this.bilingual(
+          food.spicy
+            ? "TOOTHPICK PEEK: the current serving is a SUPER CHILI."
+            : "TOOTHPICK PEEK: the current serving is SAFE.",
+          food.spicy
+            ? "牙签挑开一条缝：眼前这盆是超级无敌辣椒。"
+            : "牙签挑开一条缝：眼前这盆是普通甜椒。",
+        ),
       );
       this.tone(food.spicy ? 118 : 410, 0.12, food.spicy ? "sawtooth" : "sine");
 
@@ -725,9 +875,14 @@ export class BanquetScene extends Phaser.Scene {
         food.revealed = wasRevealed;
         this.consumePlayerItem(item);
         this.resumePlayerChoice(
-          canUseAnotherItem(this.itemUsesThisAction.player)
-            ? "餐盖重新盖好了。你还可以使用道具，或决定谁吃眼前这盆。"
-            : "餐盖重新盖好了。本次道具额度已用完，请决定谁吃眼前这盆。",
+          this.bilingual(
+            canUseAnotherItem(this.itemUsesThisAction.player)
+              ? "Covered again. Use another item, or choose [1] I eat / [2] You first."
+              : "Covered again. Choose [1] I eat / [2] You first.",
+            canUseAnotherItem(this.itemUsesThisAction.player)
+              ? "餐盖重新盖好了。你还可以使用道具，或决定谁吃眼前这盆。"
+              : "餐盖重新盖好了。本次道具额度已用完，请决定谁吃眼前这盆。",
+          ),
         );
       });
     });
@@ -735,7 +890,12 @@ export class BanquetScene extends Phaser.Scene {
     this.itemEffectHandlers.set("swap-next-food", (item) => {
       const swap = swapServedWithNext(this.foods, this.servedFoodId);
       if (!swap.swapped) {
-        this.cancelActiveItem("只剩最后一盆了，公筷已经没有可以交换的对象。");
+        this.cancelActiveItem(
+          this.bilingual(
+            "Only one serving remains. There is nothing left to swap.",
+            "只剩最后一盆了，公筷已经没有可以交换的对象。",
+          ),
+        );
         return;
       }
 
@@ -744,15 +904,25 @@ export class BanquetScene extends Phaser.Scene {
       this.servedFoodId = swap.servedId;
       this.selectedFoodId = this.servedFoodId;
       this.renderFoods();
-      this.setMessage("领导看着你用公筷，把眼前这盆和下一盆公开调换了位置……");
+      this.setMessage(
+        this.bilingual(
+          "CHOPSTICKS: you publicly swap the current serving with the next one…",
+          "领导看着你用公筷，把眼前这盆和下一盆公开调换了位置……",
+        ),
+      );
       this.tone(225, 0.08, "square");
 
       this.time.delayedCall(650, () => {
         this.consumePlayerItem(item);
         this.resumePlayerChoice(
-          canUseAnotherItem(this.itemUsesThisAction.player)
-            ? "交换完成。你还可以使用道具，或决定谁吃换上来的这一盆。"
-            : "交换完成。本次道具额度已用完，请决定谁吃换上来的这一盆。",
+          this.bilingual(
+            canUseAnotherItem(this.itemUsesThisAction.player)
+              ? "Swap complete. Use another item, or choose [1] I eat / [2] You first."
+              : "Swap complete. Choose [1] I eat / [2] You first.",
+            canUseAnotherItem(this.itemUsesThisAction.player)
+              ? "交换完成。你还可以使用道具，或决定谁吃换上来的这一盆。"
+              : "交换完成。本次道具额度已用完，请决定谁吃换上来的这一盆。",
+          ),
         );
       });
     });
@@ -762,7 +932,9 @@ export class BanquetScene extends Phaser.Scene {
         (candidate) => candidate.id === this.servedFoodId && !candidate.consumed,
       );
       if (!food) {
-        this.cancelActiveItem("眼前没有可以打包的食物。");
+        this.cancelActiveItem(
+          this.bilingual("There is no current serving to pack up.", "眼前没有可以打包的食物。"),
+        );
         return;
       }
 
@@ -770,16 +942,23 @@ export class BanquetScene extends Phaser.Scene {
       food.revealed = true;
       this.renderFoods();
       this.setMessage(
-        food.spicy
-          ? "打包盒掀开餐盖：超级无敌辣椒被装走了，没有人受伤。"
-          : "打包盒掀开餐盖：普通甜椒被装走了，没有人获得额外行动。",
+        this.bilingual(
+          food.spicy
+            ? "TAKEOUT: a super chili leaves the table. Nobody gets hurt."
+            : "TAKEOUT: a safe pepper leaves the table. Nobody gets an extra turn.",
+          food.spicy
+            ? "打包盒掀开餐盖：超级无敌辣椒被装走了，没有人受伤。"
+            : "打包盒掀开餐盖：普通甜椒被装走了，没有人获得额外行动。",
+        ),
       );
       this.tone(food.spicy ? 145 : 360, 0.1, "triangle");
 
       this.time.delayedCall(850, () => {
         const discard = discardServedEntry(this.foods, this.servedFoodId);
         if (!discard.discarded) {
-          this.cancelActiveItem("这盆食物已经不能打包了。");
+          this.cancelActiveItem(
+            this.bilingual("That serving can no longer be packed up.", "这盆食物已经不能打包了。"),
+          );
           return;
         }
 
@@ -794,13 +973,23 @@ export class BanquetScene extends Phaser.Scene {
 
         if (this.finishRoundIfEmpty()) return;
 
-        this.setMessage("打包盒被服务员封好带走。现在从固定队列端来下一盆……");
+        this.setMessage(
+          this.bilingual(
+            "The takeout box leaves the table. The next fixed serving is on its way…",
+            "打包盒被服务员封好带走。现在从固定队列端来下一盆……",
+          ),
+        );
         this.time.delayedCall(650, () => {
           this.serveNextFood();
           this.resumePlayerChoice(
-            canUseAnotherItem(this.itemUsesThisAction.player)
-              ? `${this.servingLabel()}已经上桌。你还可以使用道具，或决定谁吃。`
-              : `${this.servingLabel()}已经上桌。本次道具额度已用完，请决定谁吃。`,
+            this.bilingual(
+              canUseAnotherItem(this.itemUsesThisAction.player)
+                ? `${this.servingLabel()} is up. Use another item, or choose who eats.`
+                : `${this.servingLabel()} is up. Choose who eats.`,
+              canUseAnotherItem(this.itemUsesThisAction.player)
+                ? `${this.servingLabel()}已经上桌。你还可以使用道具，或决定谁吃。`
+                : `${this.servingLabel()}已经上桌。本次道具额度已用完，请决定谁吃。`,
+            ),
           );
         });
       });
@@ -809,7 +998,12 @@ export class BanquetScene extends Phaser.Scene {
     this.itemEffectHandlers.set("boost-next-spicy", (item) => {
       const armed = armSpicyOil(this.pendingSpicyDamage);
       if (!armed.armed) {
-        this.cancelActiveItem("魔鬼辣椒油已经在桌上了，不能继续叠加。");
+        this.cancelActiveItem(
+          this.bilingual(
+            "Devil oil is already armed. It cannot be stacked.",
+            "魔鬼辣椒油已经在桌上了，不能继续叠加。",
+          ),
+        );
         return;
       }
 
@@ -820,14 +1014,24 @@ export class BanquetScene extends Phaser.Scene {
       this.renderItemSlots();
       this.flash.setFillStyle(0xff4a18, 0.22).setAlpha(0.22);
       this.tweens.add({ targets: this.flash, alpha: 0, duration: 460, ease: "Quad.Out" });
-      this.setMessage("魔鬼辣椒油已经倒进公用蘸碟：下一颗被吃掉的超级辣椒造成双倍伤害。");
+      this.setMessage(
+        this.bilingual(
+          "DEVIL OIL ARMED: the next super chili eaten deals double damage.",
+          "魔鬼辣椒油已经倒进公用蘸碟：下一颗被吃掉的超级辣椒造成双倍伤害。",
+        ),
+      );
       this.tone(82, 0.22, "sawtooth");
 
       this.time.delayedCall(650, () => {
         this.resumePlayerChoice(
-          canUseAnotherItem(this.itemUsesThisAction.player)
-            ? "辣椒油效果正在等待触发。你还可以使用道具，或决定谁吃眼前这盆。"
-            : "辣椒油效果正在等待触发。本次道具额度已用完，请决定谁吃。",
+          this.bilingual(
+            canUseAnotherItem(this.itemUsesThisAction.player)
+              ? "Devil oil is waiting. Use another item, or choose [1] I eat / [2] You first."
+              : "Devil oil is waiting. Choose [1] I eat / [2] You first.",
+            canUseAnotherItem(this.itemUsesThisAction.player)
+              ? "辣椒油效果正在等待触发。你还可以使用道具，或决定谁吃眼前这盆。"
+              : "辣椒油效果正在等待触发。本次道具额度已用完，请决定谁吃。",
+          ),
         );
       });
     });
@@ -837,11 +1041,21 @@ export class BanquetScene extends Phaser.Scene {
     if (this.phase !== "player-target" && this.phase !== "player-item-target") return;
 
     if (this.activeItem?.instanceId === instanceId) {
-      this.cancelActiveItem("已收起道具。你可以换一件，或直接决定谁吃眼前这盆。");
+      this.cancelActiveItem(
+        this.bilingual(
+          "Item put away. Pick another, or choose [1] I eat / [2] You first.",
+          "已收起道具。你可以换一件，或直接决定谁吃眼前这盆。",
+        ),
+      );
       return;
     }
     if (!canUseAnotherItem(this.itemUsesThisAction.player)) {
-      this.cancelActiveItem("本次最多使用两件道具，请选择一份食物。");
+      this.cancelActiveItem(
+        this.bilingual(
+          "You can use at most two items per decision. Choose who eats.",
+          "本次最多使用两件道具，请选择一份食物。",
+        ),
+      );
       return;
     }
 
@@ -849,7 +1063,12 @@ export class BanquetScene extends Phaser.Scene {
     if (!item) return;
     const definition = getItemDefinition(item.definitionId);
     if (!this.itemEffectHandlers.has(definition.effectId)) {
-      this.cancelActiveItem(`${definition.name}暂时没有可用效果。`);
+      this.cancelActiveItem(
+        this.bilingual(
+          `${definition.englishName} has no available effect right now.`,
+          `${definition.name}暂时没有可用效果。`,
+        ),
+      );
       return;
     }
 
@@ -870,7 +1089,12 @@ export class BanquetScene extends Phaser.Scene {
     this.phase = "player-item-target";
     this.renderFoods();
     this.renderItemSlots();
-    this.setMessage(definition.targetPrompt);
+    this.setMessage(
+      this.language === "en" ? definition.englishTargetPrompt : definition.targetPrompt,
+    );
+    if (definition.foodTargetCount === 1 && this.servedFoodId !== null) {
+      this.selectItemFoodTarget(this.servedFoodId);
+    }
   }
 
   private selectItemFoodTarget(id: number) {
@@ -889,13 +1113,22 @@ export class BanquetScene extends Phaser.Scene {
 
     if (this.itemTargetIds.length < definition.foodTargetCount) {
       const remaining = definition.foodTargetCount - this.itemTargetIds.length;
-      this.setMessage(`${definition.targetPrompt} 还需选择 ${remaining} 个餐盖。`);
+      this.setMessage(
+        this.language === "en"
+          ? `${definition.englishTargetPrompt} ${remaining} target left.`
+          : `${definition.targetPrompt} 还需选择 ${remaining} 个餐盖。`,
+      );
       return;
     }
 
     const handler = this.itemEffectHandlers.get(definition.effectId);
     if (!handler) {
-      this.cancelActiveItem(`${definition.name}暂时没有可用效果。`);
+      this.cancelActiveItem(
+        this.bilingual(
+          `${definition.englishName} has no available effect right now.`,
+          `${definition.name}暂时没有可用效果。`,
+        ),
+      );
       return;
     }
     const targets = [...this.itemTargetIds];
@@ -924,7 +1157,7 @@ export class BanquetScene extends Phaser.Scene {
     this.targetPanel.setVisible(true);
     this.renderFoods();
     this.renderItemSlots();
-    this.turnText.setText("轮到你决定");
+    this.turnText.setText(this.bilingual("YOUR DECISION", "轮到你决定"));
     this.setMessage(message);
   }
 
@@ -935,15 +1168,23 @@ export class BanquetScene extends Phaser.Scene {
 
   private servingLabel() {
     const servingNumber = this.foods.filter((food) => food.consumed).length + 1;
-    return `第 ${servingNumber} / ${this.foods.length} 盆`;
+    return this.bilingual(
+      `SERVING ${servingNumber}/${this.foods.length}`,
+      `第 ${servingNumber} / ${this.foods.length} 盆`,
+    );
   }
 
   private finishRoundIfEmpty() {
     if (!this.foods.every((food) => food.consumed)) return false;
     this.phase = "resolving";
     this.targetPanel.setVisible(false);
-    this.setMessage("本轮六盆已经全部端完。服务员正在准备更危险的下一轮。 ");
-    this.turnText.setText("正在换盘");
+    this.setMessage(
+      this.bilingual(
+        "The queue is empty. A more dangerous round is coming…",
+        "本轮六盆已经全部端完。服务员正在准备更危险的下一轮。 ",
+      ),
+    );
+    this.turnText.setText(this.bilingual("RESETTING TABLE", "正在换盘"));
     this.renderItemSlots();
     this.time.delayedCall(1050, () => this.prepareRound());
     return true;
@@ -1156,7 +1397,18 @@ export class BanquetScene extends Phaser.Scene {
 
     const actorName = actor === "player" ? "你" : "领导";
     const targetName = target === actor ? "自己" : target === "player" ? "你" : "领导";
-    this.setMessage(`${actorName}把餐盖推向${targetName}……`);
+    this.setMessage(
+      this.bilingual(
+        actor === "player"
+          ? target === "player"
+            ? "You pull the cloche toward yourself…"
+            : "You slide the cloche toward the boss…"
+          : target === "dealer"
+            ? "The boss pulls the cloche toward himself…"
+            : "The boss slides the cloche toward you…",
+        `${actorName}把餐盖推向${targetName}……`,
+      ),
+    );
     this.tone(155, 0.11, "sawtooth");
 
     this.liftCloche(foodId, () => {
@@ -1165,9 +1417,14 @@ export class BanquetScene extends Phaser.Scene {
       this.renderFoods();
       this.playRevealEffect(foodId, food.spicy);
       this.setMessage(
-        food.spicy
-          ? "餐盖一掀：火苗比辣椒先站了起来。"
-          : "餐盖一掀：只是一颗表情无辜的普通甜椒。",
+        this.bilingual(
+          food.spicy
+            ? "SUPER CHILI! The paper flames stand up first."
+            : "SAFE. Just an innocent sweet pepper.",
+          food.spicy
+            ? "餐盖一掀：火苗比辣椒先站了起来。"
+            : "餐盖一掀：只是一颗表情无辜的普通甜椒。",
+        ),
       );
       this.tone(food.spicy ? 118 : 520, 0.11, food.spicy ? "sawtooth" : "sine");
       this.time.delayedCall(280, () => {
@@ -1202,20 +1459,34 @@ export class BanquetScene extends Phaser.Scene {
         resolution.damageTo === "player" ? this.playerHealth : this.dealerHealth,
       );
       this.setMessage(
-        spicyDamage.boosted
-          ? target === "player"
-            ? "魔鬼辣椒油生效！你连续失去两杯牛奶。"
-            : "魔鬼辣椒油生效！领导连续失去两杯牛奶。"
-          : target === "player"
-            ? "超级无敌辣椒。你的表情管理出现严重漏洞。"
-            : "超级无敌辣椒。领导的标准笑容松动了。",
+        this.bilingual(
+          spicyDamage.boosted
+            ? target === "player"
+              ? "DEVIL OIL! You lose two glasses of milk."
+              : "DEVIL OIL! The boss loses two glasses of milk."
+            : target === "player"
+              ? "SUPER CHILI. Your composure cracks."
+              : "SUPER CHILI. The boss's fixed smile slips.",
+          spicyDamage.boosted
+            ? target === "player"
+              ? "魔鬼辣椒油生效！你连续失去两杯牛奶。"
+              : "魔鬼辣椒油生效！领导连续失去两杯牛奶。"
+            : target === "player"
+              ? "超级无敌辣椒。你的表情管理出现严重漏洞。"
+              : "超级无敌辣椒。领导的标准笑容松动了。",
+        ),
       );
     } else {
       this.tone(430, 0.08, "sine");
       this.setMessage(
-        target === "player"
-          ? "普通甜椒。你甚至尝到了少许清甜。"
-          : "普通甜椒。领导礼貌地咀嚼了七次。",
+        this.bilingual(
+          target === "player"
+            ? "SAFE PEPPER. You even taste a little sweetness."
+            : "SAFE PEPPER. The boss chews politely seven times.",
+          target === "player"
+            ? "普通甜椒。你甚至尝到了少许清甜。"
+            : "普通甜椒。领导礼貌地咀嚼了七次。",
+        ),
       );
     }
     this.updateHud();
@@ -1239,8 +1510,13 @@ export class BanquetScene extends Phaser.Scene {
       if (this.finishRoundIfEmpty()) return;
 
       this.phase = "resolving";
-      this.turnText.setText("服务员正在上菜");
-      this.setMessage("空盆被端走。服务员从固定队列中端来下一盆……");
+      this.turnText.setText(this.bilingual("NEXT SERVING", "服务员正在上菜"));
+      this.setMessage(
+        this.bilingual(
+          "The empty plate leaves. The next fixed serving is on its way…",
+          "空盆被端走。服务员从固定队列中端来下一盆……",
+        ),
+      );
       this.renderItemSlots();
       this.time.delayedCall(650, () => {
         this.serveNextFood();
@@ -1262,12 +1538,22 @@ export class BanquetScene extends Phaser.Scene {
     this.targetPanel.setVisible(true);
     this.renderFoods();
     this.renderItemSlots();
-    this.turnText.setText(continuing ? "你继续决定" : "轮到你决定");
+    this.turnText.setText(
+      this.bilingual(
+        continuing ? "YOUR EXTRA BITE" : "YOUR DECISION",
+        continuing ? "你继续决定" : "轮到你决定",
+      ),
+    );
     this.setMessage(
       message ??
-        (continuing
-          ? `安全。服务员端上${this.servingLabel()}，你可以继续决定谁吃。`
-          : `服务员端上${this.servingLabel()}。决定自己吃，还是请领导吃。`),
+        this.bilingual(
+          continuing
+            ? `SAFE. ${this.servingLabel()} is up. Choose [1] I eat or [2] You first.`
+            : `${this.servingLabel()} is up. Choose [1] I eat or [2] You first.`,
+          continuing
+            ? `安全。服务员端上${this.servingLabel()}，你可以继续决定谁吃。`
+            : `服务员端上${this.servingLabel()}。决定自己吃，还是请领导吃。`,
+        ),
     );
   }
 
@@ -1280,11 +1566,21 @@ export class BanquetScene extends Phaser.Scene {
     this.targetPanel.setVisible(false);
     this.renderFoods();
     this.renderItemSlots();
-    this.turnText.setText(continuing ? "领导继续决定" : "轮到领导决定");
+    this.turnText.setText(
+      this.bilingual(
+        continuing ? "BOSS GOES AGAIN" : "BOSS DECIDES",
+        continuing ? "领导继续决定" : "轮到领导决定",
+      ),
+    );
     this.setMessage(
-      continuing
-        ? `服务员端上${this.servingLabel()}。领导决定再试一次。`
-        : `服务员端上${this.servingLabel()}。领导正在进行风险评估……`,
+      this.bilingual(
+        continuing
+          ? `${this.servingLabel()} is up. The boss goes again.`
+          : `${this.servingLabel()} is up. The boss calculates the risk…`,
+        continuing
+          ? `服务员端上${this.servingLabel()}。领导决定再试一次。`
+          : `服务员端上${this.servingLabel()}。领导正在进行风险评估……`,
+      ),
     );
 
     this.time.delayedCall(800, () => this.runDealerTurn());
@@ -1335,13 +1631,22 @@ export class BanquetScene extends Phaser.Scene {
     this.renderFoods();
     const knowledge = this.dealerKnowledgeFor(current.id);
     this.setMessage(
-      knowledge === null
-        ? action.target === "dealer"
-          ? "领导根据剩余比例，决定以身作则。"
-          : "领导根据剩余比例，微笑着把餐盖推向了你。"
-        : action.target === "dealer"
-          ? "领导看起来很有把握，决定自己吃。"
-          : "领导看起来很有把握，把餐盖推向了你。",
+      this.bilingual(
+        knowledge === null
+          ? action.target === "dealer"
+            ? "The boss reads the odds and decides to lead by example."
+            : "The boss reads the odds and slides the cloche toward you."
+          : action.target === "dealer"
+            ? "The boss looks certain and chooses to eat it himself."
+            : "The boss looks certain and slides the cloche toward you.",
+        knowledge === null
+          ? action.target === "dealer"
+            ? "领导根据剩余比例，决定以身作则。"
+            : "领导根据剩余比例，微笑着把餐盖推向了你。"
+          : action.target === "dealer"
+            ? "领导看起来很有把握，决定自己吃。"
+            : "领导看起来很有把握，把餐盖推向了你。",
+      ),
     );
     this.time.delayedCall(650, () => this.resolveChoice("dealer", action.target, current.id));
   }
@@ -1355,12 +1660,22 @@ export class BanquetScene extends Phaser.Scene {
   private useDealerItem(item: ItemInstance, effectId: string, current: Food) {
     if (effectId === "peek-food") {
       this.playItemSound(effectId);
-      this.setMessage("领导用袖口挡住视线，拿牙签悄悄挑开了餐盖……");
+      this.setMessage(
+        this.bilingual(
+          "The boss blocks your view and secretly lifts the cloche with a toothpick…",
+          "领导用袖口挡住视线，拿牙签悄悄挑开了餐盖……",
+        ),
+      );
       this.tone(205, 0.08, "triangle");
       this.time.delayedCall(700, () => {
         this.dealerKnowledge.set(current.id, current.spicy);
         this.consumeDealerItem(item);
-        this.setMessage("领导已经看清了，但你什么也没看见。");
+        this.setMessage(
+          this.bilingual(
+            "The boss knows what is underneath. You saw nothing.",
+            "领导已经看清了，但你什么也没看见。",
+          ),
+        );
         this.time.delayedCall(520, () => this.runDealerTurn());
       });
       return;
@@ -1376,7 +1691,12 @@ export class BanquetScene extends Phaser.Scene {
       this.playItemSound(effectId);
       this.consumeDealerItem(item);
       this.updateSpicyOilHud();
-      this.setMessage("领导把魔鬼辣椒油倒进了公用蘸碟。下一颗超级辣椒将造成双倍伤害。");
+      this.setMessage(
+        this.bilingual(
+          "The boss arms the shared dish with devil oil. The next super chili deals double damage.",
+          "领导把魔鬼辣椒油倒进了公用蘸碟。下一颗超级辣椒将造成双倍伤害。",
+        ),
+      );
       this.tone(82, 0.22, "sawtooth");
       this.time.delayedCall(700, () => this.runDealerTurn());
       return;
@@ -1394,7 +1714,12 @@ export class BanquetScene extends Phaser.Scene {
       this.selectedFoodId = this.servedFoodId;
       this.consumeDealerItem(item);
       this.renderFoods();
-      this.setMessage("领导用公筷交换了眼前这盆和下一盆。交换过程对双方公开。");
+      this.setMessage(
+        this.bilingual(
+          "The boss publicly swaps the current serving with the next one.",
+          "领导用公筷交换了眼前这盆和下一盆。交换过程对双方公开。",
+        ),
+      );
       this.tone(225, 0.08, "square");
       this.time.delayedCall(700, () => this.runDealerTurn());
       return;
@@ -1405,9 +1730,14 @@ export class BanquetScene extends Phaser.Scene {
       current.revealed = true;
       this.renderFoods();
       this.setMessage(
-        current.spicy
-          ? "领导打开打包盒：一盆超级无敌辣椒被公开装走。"
-          : "领导打开打包盒：一盆普通甜椒被公开装走。",
+        this.bilingual(
+          current.spicy
+            ? "The boss opens a takeout box: one super chili leaves the table."
+            : "The boss opens a takeout box: one safe pepper leaves the table.",
+          current.spicy
+            ? "领导打开打包盒：一盆超级无敌辣椒被公开装走。"
+            : "领导打开打包盒：一盆普通甜椒被公开装走。",
+        ),
       );
       this.tone(current.spicy ? 145 : 360, 0.1, "triangle");
       this.time.delayedCall(850, () => {
@@ -1424,12 +1754,22 @@ export class BanquetScene extends Phaser.Scene {
         this.renderFoods();
         this.updateHud();
         if (this.finishRoundIfEmpty()) return;
-        this.setMessage("打包盒被带走，服务员继续为领导端来下一盆……");
+        this.setMessage(
+          this.bilingual(
+            "The takeout box leaves. The next serving is on its way to the boss…",
+            "打包盒被带走，服务员继续为领导端来下一盆……",
+          ),
+        );
         this.time.delayedCall(650, () => {
           this.serveNextFood();
           this.selectedFoodId = this.servedFoodId;
           this.renderFoods();
-          this.setMessage(`${this.servingLabel()}已经上桌，领导继续评估。`);
+          this.setMessage(
+            this.bilingual(
+              `${this.servingLabel()} is up. The boss keeps calculating.`,
+              `${this.servingLabel()}已经上桌，领导继续评估。`,
+            ),
+          );
           this.time.delayedCall(450, () => this.runDealerTurn());
         });
       });
@@ -1459,7 +1799,7 @@ export class BanquetScene extends Phaser.Scene {
         yoyo: true,
         repeat: 4,
       });
-      this.dealerCaption.setText(this.dealerHealth === 1 ? "笑容正在冒烟的领导" : "努力维持标准笑容的领导");
+      this.updateDealerCaption();
     } else {
       this.tweens.add({
         targets: this.playerHands,
@@ -1473,14 +1813,32 @@ export class BanquetScene extends Phaser.Scene {
     }
   }
 
-  private finishGame(result: "won" | "lost") {
+  private finishGame(result: "won" | "lost", immediate = false) {
+    if (this.phase === "won" || this.phase === "lost") return;
+    this.exhibitionClock?.remove(false);
     this.phase = result;
-    this.turnText.setText(result === "won" ? "宴会结束" : "表情管理失败");
+    this.turnText.setText(
+      this.bilingual(
+        result === "won" ? "BANQUET OVER" : "COMPOSURE FAILED",
+        result === "won" ? "宴会结束" : "表情管理失败",
+      ),
+    );
     this.restartButton.setVisible(false);
     this.targetPanel.setVisible(false);
     this.renderItemSlots();
+    if (immediate) {
+      this.tweens.killAll();
+      this.time.removeAllEvents();
+      this.showResult(result);
+      return;
+    }
     if (result === "won") {
-      this.setMessage("领导连人带标准笑容，正在礼貌而迅速地退出宴会厅……");
+      this.setMessage(
+        this.bilingual(
+          "The boss and his fixed smile make a polite, rapid exit…",
+          "领导连人带标准笑容，正在礼貌而迅速地退出宴会厅……",
+        ),
+      );
       this.tone(74, 0.36, "sawtooth", 0.028);
       this.tweens.add({
         targets: this.dealerSilhouette,
@@ -1491,7 +1849,12 @@ export class BanquetScene extends Phaser.Scene {
         onComplete: () => this.showResult(result),
       });
     } else {
-      this.setMessage("你的双手决定先于本人离席。表情管理宣告失败……");
+      this.setMessage(
+        this.bilingual(
+          "Your hands leave the banquet before the rest of you. Composure failed…",
+          "你的双手决定先于本人离席。表情管理宣告失败……",
+        ),
+      );
       this.tone(86, 0.42, "square", 0.025);
       this.tweens.add({
         targets: this.playerHands,
@@ -1506,6 +1869,7 @@ export class BanquetScene extends Phaser.Scene {
   }
 
   private showResult(result: "won" | "lost") {
+    if (this.resultOverlay) return;
     const won = result === "won";
     const overlay = this.add.container(0, 0).setDepth(110);
     const shade = this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, 0x080101, 0.88);
@@ -1513,27 +1877,48 @@ export class BanquetScene extends Phaser.Scene {
       .rectangle(WIDTH / 2, HEIGHT / 2, 720, 460, 0x1c0806, 0.98)
       .setStrokeStyle(3, won ? 0xe3913f : 0xa91f18, 0.85);
     const kicker = this.add
-      .text(WIDTH / 2, 215, won ? "试吃会圆满结束" : "事故调查结果", {
+      .text(
+        WIDTH / 2,
+        215,
+        this.bilingual(
+          won ? "BANQUET SURVIVED" : "INCIDENT REPORT",
+          won ? "试吃会圆满结束" : "事故调查结果",
+        ),
+        {
         fontFamily: "monospace",
         fontSize: "14px",
         color: won ? "#e4aa5a" : "#d75342",
         letterSpacing: 4,
-      })
+        },
+      )
       .setOrigin(0.5);
     const title = this.add
-      .text(WIDTH / 2, 292, won ? "领导先走了" : "你辣到离职了", {
+      .text(
+        WIDTH / 2,
+        292,
+        this.bilingual(
+          won ? "THE BOSS LEFT FIRST" : "YOU GOT FIRED BY CHILI",
+          won ? "领导先走了" : "你辣到离职了",
+        ),
+        {
         fontFamily: "serif",
         fontSize: "55px",
         color: "#ffe6b8",
-      })
+        },
+      )
       .setOrigin(0.5);
     const description = this.add
       .text(
         WIDTH / 2,
         360,
-        won
-          ? `你坚持了 ${this.round} 轮。领导连人带椅子退出了宴会厅。`
-          : `第 ${this.round} 轮，你的最后一杯牛奶也没能挽救表情管理。`,
+        this.bilingual(
+          won
+            ? `You survived ${this.round} round${this.round === 1 ? "" : "s"}. The boss and his smile have left the room.`
+            : `Round ${this.round}. Your final glass of milk could not save your composure.`,
+          won
+            ? `你坚持了 ${this.round} 轮。领导连人带椅子退出了宴会厅。`
+            : `第 ${this.round} 轮，你的最后一杯牛奶也没能挽救表情管理。`,
+        ),
         {
           fontFamily: "sans-serif",
           fontSize: "17px",
@@ -1541,11 +1926,183 @@ export class BanquetScene extends Phaser.Scene {
         },
       )
       .setOrigin(0.5);
-    const retry = this.makeButton(WIDTH / 2, 470, 330, 70, "再吃一桌", 0x8e2118, () => {
-      this.startGame();
-    });
-    overlay.add([shade, panel, kicker, title, description, retry]);
+    const retry = this.makeButton(
+      WIDTH / 2,
+      470,
+      360,
+      70,
+      "[ENTER] PLAY AGAIN / 再吃一桌",
+      0x8e2118,
+      () => this.restartScene(),
+    );
+    const autoRestart = this.add
+      .text(
+        WIDTH / 2,
+        530,
+        this.bilingual(
+          `Show-floor reset in ${AUTO_RESTART_SECONDS}s`,
+          `${AUTO_RESTART_SECONDS} 秒后自动重新开席`,
+        ),
+        {
+          fontFamily: "monospace",
+          fontSize: "12px",
+          color: "#8f6756",
+        },
+      )
+      .setOrigin(0.5);
+    overlay.add([shade, panel, kicker, title, description, retry, autoRestart]);
     this.resultOverlay = overlay;
+    let secondsLeft = AUTO_RESTART_SECONDS;
+    this.autoRestartClock?.remove(false);
+    this.autoRestartClock = this.time.addEvent({
+      delay: 1000,
+      repeat: AUTO_RESTART_SECONDS - 1,
+      callback: () => {
+        secondsLeft -= 1;
+        if (secondsLeft <= 0) {
+          this.restartScene();
+          return;
+        }
+        autoRestart.setText(
+          this.bilingual(
+            `Show-floor reset in ${secondsLeft}s`,
+            `${secondsLeft} 秒后自动重新开席`,
+          ),
+        );
+      },
+    });
+  }
+
+  private bilingual(english: string, chinese: string) {
+    return this.language === "en" ? english : chinese;
+  }
+
+  private updateDealerCaption() {
+    const english =
+      this.dealerHealth === 1
+        ? "THE BOSS WHOSE SMILE IS SMOKING"
+        : this.dealerHealth < MAX_HEALTH
+          ? "THE BOSS HOLDING ONTO HIS SMILE"
+          : "THE BOSS WITH A FIXED SMILE";
+    const chinese =
+      this.dealerHealth === 1
+        ? "笑容正在冒烟的领导"
+        : this.dealerHealth < MAX_HEALTH
+          ? "努力维持标准笑容的领导"
+          : "笑容过于标准的领导";
+    this.dealerCaption?.setText(this.bilingual(english, chinese));
+  }
+
+  private restartScene() {
+    this.scene.restart({ autoStart: true, language: this.language });
+  }
+
+  private toggleLanguage() {
+    this.language = this.language === "en" ? "zh" : "en";
+    document.documentElement.lang = this.language === "en" ? "en" : "zh-CN";
+    this.languageButton?.setData("language", this.language);
+    this.spicyOilText?.setText(
+      this.bilingual(
+        "DEVIL OIL ARMED · NEXT SUPER CHILI DEALS 2 DAMAGE",
+        "魔鬼辣椒油待触发 · 下一颗超级辣椒造成 2 点伤害",
+      ),
+    );
+    if (this.phase === "intro") {
+      this.showIntro();
+      return;
+    }
+    if (this.phase === "won" || this.phase === "lost") {
+      const result = this.phase;
+      this.autoRestartClock?.remove(false);
+      this.resultOverlay?.destroy(true);
+      this.resultOverlay = undefined;
+      this.showResult(result);
+      return;
+    }
+    this.drawMilkRows();
+    this.renderItemSlots();
+    this.updateHud();
+    this.updateTimerText();
+    this.updateDealerCaption();
+    if (this.round > 0) {
+      this.roundText.setText(this.bilingual(`ROUND ${this.round}`, `第 ${this.round} 轮`));
+    }
+    if (this.phase === "round-preview") {
+      this.turnText.setText(this.bilingual("MEMORIZE THE ODDS", "请记住数量"));
+    } else if (this.phase === "player-target" || this.phase === "player-item-target") {
+      this.turnText.setText(this.bilingual("YOUR DECISION", "轮到你决定"));
+    } else if (this.phase === "ai-turn") {
+      this.turnText.setText(this.bilingual("BOSS DECIDES", "轮到领导决定"));
+    } else {
+      this.turnText.setText(this.bilingual("RESOLVING", "正在结算"));
+    }
+    this.setMessage(
+      this.bilingual(
+        "English mode ready. Keys: 1 I eat · 2 You first · 3–6 items · R restart.",
+        "中文模式已启用。按键：1 我先吃 · 2 您先吃 · 3–6 道具 · R 重开。",
+      ),
+    );
+  }
+
+  private registerKeyboardControls() {
+    this.input.keyboard?.on("keydown", (event: KeyboardEvent) => {
+      if (event.repeat) return;
+      if (event.key === "Enter" || event.code === "Space") {
+        if (this.phase === "intro") {
+          event.preventDefault();
+          this.startGame();
+        } else if (this.phase === "won" || this.phase === "lost") {
+          event.preventDefault();
+          this.restartScene();
+        }
+        return;
+      }
+      if (event.key.toLowerCase() === "l") {
+        this.toggleLanguage();
+        return;
+      }
+      if (event.key.toLowerCase() === "r" && this.phase !== "intro") {
+        this.restartScene();
+        return;
+      }
+      if (event.key === "1") {
+        this.resolvePlayerChoice("player");
+        return;
+      }
+      if (event.key === "2") {
+        this.resolvePlayerChoice("dealer");
+        return;
+      }
+      const itemIndex = Number(event.key) - 3;
+      if (itemIndex >= 0 && itemIndex < MAX_ITEM_SLOTS) {
+        const item = this.playerItems[itemIndex];
+        if (item) this.activatePlayerItem(item.instanceId);
+      }
+    });
+  }
+
+  private tickExhibitionClock() {
+    if (this.phase === "intro" || this.phase === "won" || this.phase === "lost") return;
+    this.exhibitionSeconds = Math.max(
+      0,
+      Math.ceil((this.exhibitionDeadline - Date.now()) / 1000),
+    );
+    this.updateTimerText();
+    if (this.exhibitionSeconds > 0) return;
+    this.exhibitionClock?.remove(false);
+    this.setMessage(
+      this.bilingual(
+        "Three minutes. The banquet committee compares the remaining milk…",
+        "三分钟到。宴会委员会开始比较双方剩余的牛奶……",
+      ),
+    );
+    this.finishGame(decideExhibitionResult(this.playerHealth, this.dealerHealth), true);
+  }
+
+  private updateTimerText() {
+    this.timerText?.setText(
+      `${this.bilingual("SHOW FLOOR", "展会对局")} ${formatExhibitionTime(this.exhibitionSeconds)}`,
+    );
   }
 
   private updateHud() {
@@ -1553,7 +2110,12 @@ export class BanquetScene extends Phaser.Scene {
     const spicy = remaining.filter((food) => food.spicy).length;
     const safe = remaining.length - spicy;
     this.remainingText.setText(
-      remaining.length > 0 ? `剩余：普通甜椒 ${safe}  ·  超级无敌辣椒 ${spicy}` : "本轮餐盘已空",
+      remaining.length > 0
+        ? this.bilingual(
+            `LEFT: SAFE ${safe} · SUPER CHILI ${spicy}`,
+            `剩余：普通甜椒 ${safe}  ·  超级无敌辣椒 ${spicy}`,
+          )
+        : this.bilingual("QUEUE EMPTY", "本轮餐盘已空"),
     );
   }
 
