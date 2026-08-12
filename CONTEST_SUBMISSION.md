@@ -18,6 +18,17 @@ Updated: 2026-08-12
 
 One covered dish is harmless. Another can burn through your composure. Read the odds, bluff your boss, and make them take the bite.
 
+## Combos game-page copy
+
+- Title: `You First / 您先吃`
+- Short description: `A three-minute corporate chili bluff. Read the odds, use your items, and decide who takes the dangerous bite.`
+- Suggested tags: `strategy`, `bluff`, `party`, `bilingual`, `keyboard`, `mobile`
+- Upload preference: use the source package first; use the static package if Combos asks for a ready-built website.
+
+### Ready-to-paste creation prompt
+
+Publish the attached game exactly as provided. It is a bilingual Phaser browser game called “You First / 您先吃”. Preserve the English default, Chinese toggle, keyboard and touch controls, three-minute match timer, procedural audio, responsive landscape layout, and all supplied artwork. Do not replace the game with a landing page.
+
 ## Suggested social post
 
 Would you still say “You first” if one covered dish hides the hottest chili?
