@@ -30,6 +30,12 @@ import {
   type ItemInstance,
   type ItemOwner,
 } from "./items";
+import {
+  applyDecisionCopy,
+  getDecisionCopy,
+  getInterfaceCopy,
+  type Language,
+} from "./localization";
 
 type Phase =
   | "intro"
@@ -47,8 +53,6 @@ type Food = {
   revealed: boolean;
   consumed: boolean;
 };
-
-type Language = "en" | "zh";
 
 const WIDTH = 1280;
 const HEIGHT = 720;
@@ -99,6 +103,9 @@ export class BanquetScene extends Phaser.Scene {
   private playerItemRoot!: Phaser.GameObjects.Container;
   private dealerItemRoot!: Phaser.GameObjects.Container;
   private targetPanel!: Phaser.GameObjects.Container;
+  private targetPromptText!: Phaser.GameObjects.Text;
+  private selfChoiceText!: Phaser.GameObjects.Text;
+  private dealerChoiceText!: Phaser.GameObjects.Text;
   private introOverlay?: Phaser.GameObjects.Container;
   private resultOverlay?: Phaser.GameObjects.Container;
   private dealerSilhouette!: Phaser.GameObjects.Container;
@@ -148,6 +155,7 @@ export class BanquetScene extends Phaser.Scene {
     this.drawRoom();
     this.createHud();
     this.createTargetPanel();
+    this.syncDocumentLanguage();
     this.registerKeyboardControls();
     if (this.autoStartOnCreate) this.startGame();
     else this.showIntro();
@@ -313,13 +321,19 @@ export class BanquetScene extends Phaser.Scene {
     this.playerMilk = this.add.container(190, 625).setDepth(31);
     this.dealerItemRoot = this.add.container(1150, 230).setDepth(52);
     this.playerItemRoot = this.add.container(WIDTH / 2, 695).setDepth(70);
-    this.restartButton = this.makeCompactButton(1191, 91, 142, 36, "[R] RESTART", () =>
+    const interfaceCopy = getInterfaceCopy(this.language);
+    this.restartButton = this.makeCompactButton(1191, 91, 142, 36, interfaceCopy.restart, () =>
       this.restartScene(),
     )
       .setDepth(61)
       .setVisible(false);
-    this.languageButton = this.makeCompactButton(1185, 137, 154, 34, "[L] 中文 / EN", () =>
-      this.toggleLanguage(),
+    this.languageButton = this.makeCompactButton(
+      1185,
+      137,
+      154,
+      34,
+      interfaceCopy.languageToggle,
+      () => this.toggleLanguage(),
     ).setDepth(121);
     this.drawMilkRows();
     this.renderItemSlots();
@@ -425,38 +439,55 @@ export class BanquetScene extends Phaser.Scene {
         const iconTexture = ITEM_TEXTURES[definition.id];
         const icon = iconTexture
           ? this.add
-              .image(player ? -29 : -27, 0, iconTexture)
-              .setDisplaySize(34, 34)
+              .image(player ? -29 : -27, player ? -5 : 0, iconTexture)
+              .setDisplaySize(player ? 30 : 32, player ? 30 : 32)
               .setAlpha(player && !canInteract ? 0.58 : 0.92)
           : this.add
               .text(
                 player ? -29 : -26,
-                0,
+                player ? -5 : 0,
                 this.language === "en" ? definition.englishShortLabel : definition.shortLabel,
                 {
                 fontFamily: "serif",
-                fontSize: "21px",
+                fontSize: player ? "19px" : "20px",
                 color: `#${definition.tint.toString(16).padStart(6, "0")}`,
                 },
               )
               .setOrigin(0.5);
+        const localizedName = this.language === "en" ? definition.englishName : definition.name;
+        const maxNameWidth = player ? 56 : 54;
+        let nameFontSize = 10;
         const name = this.add
           .text(
-            player ? 12 : 10,
+            player ? 14 : 15,
             0,
-            player
-              ? `[${index + 3}] ${this.language === "en" ? definition.englishName : definition.name}`
-              : this.language === "en"
-                ? definition.englishName
-                : definition.name,
+            localizedName,
             {
             fontFamily: "monospace",
-            fontSize: "11px",
+            fontSize: `${nameFontSize}px`,
+            fontStyle: "bold",
+            align: "center",
             color: canInteract ? "#f3d9b2" : "#806459",
             },
           )
           .setOrigin(0.5);
+        while (name.width > maxNameWidth && nameFontSize > 7) {
+          nameFontSize -= 1;
+          name.setFontSize(nameFontSize);
+        }
         slot.add([icon, name]);
+
+        if (player) {
+          const keyHint = this.add
+            .text(-29, 15, `[${index + 3}]`, {
+              fontFamily: "monospace",
+              fontSize: "7px",
+              fontStyle: "bold",
+              color: canInteract ? "#f3d9b2" : "#806459",
+            })
+            .setOrigin(0.5);
+          slot.add(keyHint);
+        }
 
         if (canInteract) {
           touchArea.setInteractive({ useHandCursor: true });
@@ -484,21 +515,24 @@ export class BanquetScene extends Phaser.Scene {
   }
 
   private createTargetPanel() {
+    const copy = getDecisionCopy(this.language);
     this.targetPanel = this.add.container(WIDTH / 2, 600).setDepth(60).setVisible(false);
-    const prompt = this.add
-      .text(0, -47, "WHO TAKES THE BITE? / 眼前这盆，谁先吃？", {
+    this.targetPromptText = this.add
+      .text(0, -47, copy.prompt, {
         fontFamily: "serif",
         fontSize: "19px",
         color: "#ffe7b8",
       })
       .setOrigin(0.5);
-    const selfButton = this.makeButton(-145, 0, 250, 62, "[1] I EAT / 我先吃", 0x6e2b1c, () =>
+    const selfButton = this.makeButton(-145, 0, 250, 62, copy.selfChoice, 0x6e2b1c, () =>
       this.resolvePlayerChoice("player"),
     );
-    const dealerButton = this.makeButton(145, 0, 250, 62, "[2] YOU FIRST / 您先吃", 0xa52218, () =>
+    const dealerButton = this.makeButton(145, 0, 250, 62, copy.dealerChoice, 0xa52218, () =>
       this.resolvePlayerChoice("dealer"),
     );
-    this.targetPanel.add([prompt, selfButton, dealerButton]);
+    this.selfChoiceText = selfButton.getData("labelText") as Phaser.GameObjects.Text;
+    this.dealerChoiceText = dealerButton.getData("labelText") as Phaser.GameObjects.Text;
+    this.targetPanel.add([this.targetPromptText, selfButton, dealerButton]);
   }
 
   private makeButton(
@@ -531,6 +565,7 @@ export class BanquetScene extends Phaser.Scene {
       onClick();
     });
     root.add([touchArea, background, text]);
+    root.setData("labelText", text);
     return root;
   }
 
@@ -563,6 +598,7 @@ export class BanquetScene extends Phaser.Scene {
       onClick();
     });
     root.add([touchArea, background, text]);
+    root.setData("labelText", text);
     return root;
   }
 
@@ -652,7 +688,9 @@ export class BanquetScene extends Phaser.Scene {
         },
       )
       .setOrigin(0.5);
-    warning.setText(`${warning.text} · [L] 中文 / EN`);
+    warning.setText(
+      `${warning.text}${this.bilingual(" · [L] LANGUAGE", " · [L] 切换语言")}`,
+    );
     overlay.add([shade, panel, eyebrow, title, subtitle, rules, start, warning]);
     this.introOverlay = overlay;
   }
@@ -777,10 +815,16 @@ export class BanquetScene extends Phaser.Scene {
       graphics.strokeEllipse(0, 10, 118, 42);
 
       if (food.consumed) {
+        const interfaceCopy = getInterfaceCopy(this.language);
         const empty = this.add
-          .text(0, 6, "空", { fontFamily: "serif", fontSize: "22px", color: "#5f3228" })
+          .text(0, 6, interfaceCopy.emptyDish, {
+            fontFamily: "serif",
+            fontSize: "22px",
+            color: "#5f3228",
+          })
           .setOrigin(0.5);
         container.add([graphics, empty]);
+        container.setData("foodLabel", empty);
       } else if (food.revealed) {
         const pepper = this.add
           .image(0, food.spicy ? -7 : -4, food.spicy ? "super-chili" : "sweet-pepper")
@@ -801,6 +845,7 @@ export class BanquetScene extends Phaser.Scene {
           .setOrigin(0.5);
         container.add([graphics, pepper, label]);
         container.setData("foodVisuals", [pepper, label]);
+        container.setData("foodLabel", label);
       } else {
         const cloche = this.add.image(0, -7, "cloche").setDisplaySize(124, 82);
         container.add([graphics, cloche]);
@@ -1931,7 +1976,7 @@ export class BanquetScene extends Phaser.Scene {
       470,
       360,
       70,
-      "[ENTER] PLAY AGAIN / 再吃一桌",
+      getInterfaceCopy(this.language).retry,
       0x8e2118,
       () => this.restartScene(),
     );
@@ -1999,14 +2044,7 @@ export class BanquetScene extends Phaser.Scene {
 
   private toggleLanguage() {
     this.language = this.language === "en" ? "zh" : "en";
-    document.documentElement.lang = this.language === "en" ? "en" : "zh-CN";
-    this.languageButton?.setData("language", this.language);
-    this.spicyOilText?.setText(
-      this.bilingual(
-        "DEVIL OIL ARMED · NEXT SUPER CHILI DEALS 2 DAMAGE",
-        "魔鬼辣椒油待触发 · 下一颗超级辣椒造成 2 点伤害",
-      ),
-    );
+    this.refreshLocalizedUi();
     if (this.phase === "intro") {
       this.showIntro();
       return;
@@ -2019,15 +2057,46 @@ export class BanquetScene extends Phaser.Scene {
       this.showResult(result);
       return;
     }
+    this.setMessage(
+      this.bilingual(
+        "English mode ready. Keys: 1 I eat · 2 You first · 3–6 items · R restart.",
+        "中文模式已启用。按键：1 我先吃 · 2 您先吃 · 3–6 道具 · R 重开。",
+      ),
+    );
+  }
+
+  private refreshLocalizedUi() {
+    this.syncDocumentLanguage();
+    const interfaceCopy = getInterfaceCopy(this.language);
+    this.setButtonText(this.restartButton, interfaceCopy.restart);
+    this.setButtonText(this.languageButton, interfaceCopy.languageToggle);
+    if (this.targetPromptText && this.selfChoiceText && this.dealerChoiceText) {
+      applyDecisionCopy(this.language, {
+        prompt: this.targetPromptText,
+        selfChoice: this.selfChoiceText,
+        dealerChoice: this.dealerChoiceText,
+      });
+    }
+    this.spicyOilText?.setText(
+      this.bilingual(
+        "DEVIL OIL ARMED · NEXT SUPER CHILI DEALS 2 DAMAGE",
+        "魔鬼辣椒油待触发 · 下一颗超级辣椒造成 2 点伤害",
+      ),
+    );
     this.drawMilkRows();
     this.renderItemSlots();
     this.updateHud();
     this.updateTimerText();
     this.updateDealerCaption();
+    this.refreshFoodLabels();
     if (this.round > 0) {
       this.roundText.setText(this.bilingual(`ROUND ${this.round}`, `第 ${this.round} 轮`));
     }
-    if (this.phase === "round-preview") {
+    if (this.phase === "intro") {
+      this.roundText.setText(this.bilingual("NOT SEATED", "尚未入席"));
+      this.turnText.setText(this.bilingual("MIDNIGHT BANQUET", "午夜宴会"));
+      this.setMessage(this.bilingual("Take your seat.", "请坐。"));
+    } else if (this.phase === "round-preview") {
       this.turnText.setText(this.bilingual("MEMORIZE THE ODDS", "请记住数量"));
     } else if (this.phase === "player-target" || this.phase === "player-item-target") {
       this.turnText.setText(this.bilingual("YOUR DECISION", "轮到你决定"));
@@ -2036,12 +2105,38 @@ export class BanquetScene extends Phaser.Scene {
     } else {
       this.turnText.setText(this.bilingual("RESOLVING", "正在结算"));
     }
-    this.setMessage(
-      this.bilingual(
-        "English mode ready. Keys: 1 I eat · 2 You first · 3–6 items · R restart.",
-        "中文模式已启用。按键：1 我先吃 · 2 您先吃 · 3–6 道具 · R 重开。",
-      ),
-    );
+  }
+
+  private setButtonText(button: Phaser.GameObjects.Container | undefined, text: string) {
+    const label = button?.getData("labelText") as Phaser.GameObjects.Text | undefined;
+    label?.setText(text);
+  }
+
+  private refreshFoodLabels() {
+    const interfaceCopy = getInterfaceCopy(this.language);
+    this.foodObjects.forEach((container, foodId) => {
+      const label = container.getData("foodLabel") as Phaser.GameObjects.Text | undefined;
+      const food = this.foods.find((candidate) => candidate.id === foodId);
+      if (!label || !food) return;
+      label.setText(
+        food.consumed
+          ? interfaceCopy.emptyDish
+          : food.spicy
+            ? interfaceCopy.superChili
+            : interfaceCopy.sweetPepper,
+      );
+    });
+  }
+
+  private syncDocumentLanguage() {
+    const interfaceCopy = getInterfaceCopy(this.language);
+    document.documentElement.lang = this.language === "en" ? "en" : "zh-CN";
+    document.title = interfaceCopy.documentTitle;
+    document.querySelector("#game")?.setAttribute("aria-label", interfaceCopy.gameAriaLabel);
+    const orientationHint = document.querySelector<HTMLElement>(".orientation-hint");
+    if (orientationHint) orientationHint.textContent = interfaceCopy.orientationHint;
+    const instructions = document.querySelector<HTMLElement>(".screen-reader-instructions");
+    if (instructions) instructions.textContent = interfaceCopy.screenReaderInstructions;
   }
 
   private registerKeyboardControls() {

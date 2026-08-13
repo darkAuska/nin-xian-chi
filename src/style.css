@@ -31,11 +31,15 @@ body {
 }
 
 #game::before {
-  content: "SETTING THE MIDNIGHT TABLE · 正在布置午夜宴席……";
+  content: "SETTING THE MIDNIGHT TABLE…";
   position: absolute;
   color: rgba(255, 231, 190, 0.35);
   font: 700 12px/1 monospace;
   letter-spacing: 0.16em;
+}
+
+html:lang(zh-CN) #game::before {
+  content: "正在布置午夜宴席……";
 }
 
 #game canvas {
